@@ -16,7 +16,7 @@ const __dirname = path.dirname(__filename);
 const upload = multer({ storage: multer.memoryStorage() });
 
 // Admin Portal State
-let adminPassword = process.env.ADMIN_PASSWORD || "admin123";
+let adminPassword = (process.env.ADMIN_PASSWORD || "admin123").trim().replace(/^["']|["']$/g, "");
 interface PendingResume {
   id: string;
   fileName: string;
@@ -130,6 +130,8 @@ async function startServer() {
   const app = express();
   const PORT = 3000;
 
+  console.log(`[AUTH] Admin password source: ${process.env.ADMIN_PASSWORD ? 'Environment Variable' : 'Default (admin123)'}`);
+  
   app.use(express.json({ limit: '50mb' }));
   app.use(express.urlencoded({ limit: '50mb', extended: true }));
   console.log("Express JSON middleware loaded with 50mb limit");
@@ -159,10 +161,13 @@ async function startServer() {
 
   app.post("/api/admin/login", (req, res) => {
     const { password } = req.body;
-    console.log(`Login attempt: "${password}" | Expected: "${adminPassword}"`);
+    const submittedPassword = (password || "").toString().trim().replace(/^["']|["']$/g, "");
+    const targetPassword = adminPassword.toString().trim().replace(/^["']|["']$/g, "");
+    
+    console.log(`Login attempt: "${submittedPassword}" | Expected: "${targetPassword}"`);
     
     // Allow both the current adminPassword and a hardcoded fallback for emergency access
-    if (password === adminPassword || password === "admin123" || password === "123") {
+    if (submittedPassword === targetPassword || submittedPassword === "admin123" || submittedPassword === "123") {
       res.json({ success: true, token: ADMIN_TOKEN });
     } else {
       res.status(401).json({ success: false, error: "Invalid admin password" });

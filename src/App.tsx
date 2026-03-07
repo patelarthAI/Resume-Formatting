@@ -25,7 +25,9 @@ import {
   Check,
   X,
   LogIn,
-  LogOut
+  LogOut,
+  Eye,
+  EyeOff
 } from 'lucide-react';
 import * as mammoth from 'mammoth';
 
@@ -81,6 +83,11 @@ const App: React.FC = () => {
   const [pendingResumes, setPendingResumes] = useState<PendingResume[]>([]);
   const [isLoggingIn, setIsLoggingIn] = useState<boolean>(false);
   const [adminError, setAdminError] = useState<string>('');
+  const [newAdminPassword, setNewAdminPassword] = useState<string>('');
+  const [changePasswordStatus, setChangePasswordStatus] = useState<{type: 'success'|'error', msg: string} | null>(null);
+  const [isChangingPassword, setIsChangingPassword] = useState<boolean>(false);
+  const [currentAdminPassword, setCurrentAdminPassword] = useState<string>('');
+  const [showCurrentPassword, setShowCurrentPassword] = useState<boolean>(false);
   const [isApproving, setIsApproving] = useState<string | null>(null);
   const [adminStats, setAdminStats] = useState({ approvedToday: 0, declinedToday: 0, approvedMonth: 0, declinedMonth: 0 });
   const [adminConfig, setAdminConfig] = useState<any>(null);
@@ -118,6 +125,7 @@ const App: React.FC = () => {
       fetchPendingResumes();
       fetchAdminStats();
       fetchAdminConfig();
+      fetchCurrentPassword();
     }
   }, [isAdminLoggedIn]);
 
@@ -133,6 +141,22 @@ const App: React.FC = () => {
       }
     } catch (err) {
       console.error("Failed to fetch admin config", err);
+    }
+  };
+
+  const fetchCurrentPassword = async () => {
+    const token = localStorage.getItem('adminToken');
+    if (!token) return;
+    try {
+      const res = await fetch('/api/admin/current-password', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setCurrentAdminPassword(data.password);
+      }
+    } catch (err) {
+      console.error("Failed to fetch current password", err);
     }
   };
 
@@ -362,6 +386,39 @@ const App: React.FC = () => {
     localStorage.removeItem('adminToken');
     setIsAdminLoggedIn(false);
     setPendingResumes([]);
+  };
+
+  const handleChangePassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (newAdminPassword.length < 6) {
+      setChangePasswordStatus({ type: 'error', msg: 'Password must be at least 6 characters' });
+      return;
+    }
+    setIsChangingPassword(true);
+    setChangePasswordStatus(null);
+    try {
+      const token = localStorage.getItem('adminToken');
+      const res = await fetch('/api/admin/change-password', {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ token, newPassword: newAdminPassword })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setChangePasswordStatus({ type: 'success', msg: 'Password updated successfully' });
+        setCurrentAdminPassword(newAdminPassword);
+        setNewAdminPassword('');
+      } else {
+        setChangePasswordStatus({ type: 'error', msg: data.error || 'Failed to update password' });
+      }
+    } catch (err) {
+      setChangePasswordStatus({ type: 'error', msg: 'Network error' });
+    } finally {
+      setIsChangingPassword(false);
+    }
   };
 
   const handleApprove = async (pending: PendingResume) => {
@@ -627,6 +684,56 @@ const App: React.FC = () => {
                     </motion.div>
                   ))
                 )}
+              </div>
+
+              <div className="mt-12 pt-8 border-t border-white/5">
+                <div className="bg-white/5 border border-white/10 rounded-2xl p-4 max-w-2xl mx-auto">
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                      <Lock className="w-4 h-4 text-indigo-400" />
+                      Security Settings
+                    </h3>
+                    <button 
+                      onClick={() => setShowCurrentPassword(!showCurrentPassword)}
+                      className="text-[10px] text-slate-500 hover:text-indigo-400 transition-colors uppercase tracking-widest font-bold flex items-center gap-1"
+                    >
+                      {showCurrentPassword ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
+                      {showCurrentPassword ? 'Hide' : 'Reveal'} Current Password
+                    </button>
+                  </div>
+                  
+                  {showCurrentPassword && (
+                    <div className="mb-4 p-3 bg-indigo-500/5 border border-indigo-500/10 rounded-xl flex items-center justify-between">
+                      <span className="text-xs text-slate-400">Current Admin Password:</span>
+                      <span className="text-sm font-mono text-indigo-300 font-bold">{currentAdminPassword}</span>
+                    </div>
+                  )}
+
+                  <form onSubmit={handleChangePassword} className="flex items-end gap-3">
+                    <div className="flex-1">
+                      <label className="block text-[10px] text-slate-500 mb-1.5 uppercase tracking-wider font-bold">New Password</label>
+                      <input 
+                        type="password"
+                        value={newAdminPassword}
+                        onChange={(e) => setNewAdminPassword(e.target.value)}
+                        placeholder="Min 6 characters"
+                        className="w-full bg-zinc-950/50 border border-white/10 rounded-lg py-2 px-3 text-white focus:outline-none focus:ring-1 focus:ring-indigo-500/50 transition-all text-xs"
+                      />
+                    </div>
+                    <button 
+                      type="submit"
+                      disabled={isChangingPassword || newAdminPassword.length < 6}
+                      className="py-2 px-4 bg-indigo-500 hover:bg-indigo-400 disabled:opacity-50 text-white font-bold rounded-lg transition-all flex items-center gap-2 text-xs"
+                    >
+                      {isChangingPassword ? <Loader2 className="w-3 h-3 animate-spin" /> : 'Update'}
+                    </button>
+                  </form>
+                  {changePasswordStatus && (
+                    <p className={`mt-2 text-[10px] ${changePasswordStatus.type === 'success' ? 'text-emerald-400' : 'text-red-400'}`}>
+                      {changePasswordStatus.msg}
+                    </p>
+                  )}
+                </div>
               </div>
             </div>
           )}

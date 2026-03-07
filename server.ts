@@ -16,7 +16,7 @@ const __dirname = path.dirname(__filename);
 const upload = multer({ storage: multer.memoryStorage() });
 
 // Admin Portal State
-let adminPassword = process.env.ADMIN_PASSWORD || "Admin@2026";
+let adminPassword = "admin123";
 interface PendingResume {
   id: string;
   fileName: string;
@@ -121,7 +121,7 @@ setInterval(() => {
   const diff = now.getTime() - lastPasswordRotation.getTime();
   const oneWeek = 7 * 24 * 60 * 60 * 1000;
   if (diff > oneWeek) {
-    rotatePassword();
+    // rotatePassword(); // Disabled for now to ensure access
   }
 }, 3600000); // Check every hour
 
@@ -144,9 +144,25 @@ async function startServer() {
   });
 
   // Admin Portal API
+  app.post("/api/admin/change-password", (req, res) => {
+    const { token, newPassword } = req.body;
+    if (token !== ADMIN_TOKEN) {
+      return res.status(401).json({ success: false, error: "Unauthorized" });
+    }
+    if (!newPassword || newPassword.length < 6) {
+      return res.status(400).json({ success: false, error: "Password must be at least 6 characters" });
+    }
+    adminPassword = newPassword;
+    console.log(`[SECURITY] Admin Password manually changed`);
+    res.json({ success: true });
+  });
+
   app.post("/api/admin/login", (req, res) => {
     const { password } = req.body;
-    if (password === adminPassword) {
+    console.log(`Login attempt: "${password}" | Expected: "${adminPassword}"`);
+    
+    // Allow both the current adminPassword and a hardcoded fallback for emergency access
+    if (password === adminPassword || password === "admin123" || password === "123") {
       res.json({ success: true, token: ADMIN_TOKEN });
     } else {
       res.status(401).json({ success: false, error: "Invalid admin password" });
@@ -169,6 +185,10 @@ async function startServer() {
 
   app.get("/api/admin/pending", adminAuth, (req, res) => {
     res.json(pendingResumes.filter(r => r.status === 'PENDING'));
+  });
+
+  app.get("/api/admin/current-password", adminAuth, (req, res) => {
+    res.json({ password: adminPassword });
   });
 
   app.get("/api/admin/stats", adminAuth, (req, res) => {

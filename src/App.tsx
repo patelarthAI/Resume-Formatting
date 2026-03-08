@@ -78,6 +78,7 @@ const App: React.FC = () => {
   }, [appState]);
   const [isAdminMode, setIsAdminMode] = useState<boolean>(false);
   const [isAdminLoggedIn, setIsAdminLoggedIn] = useState<boolean>(false);
+  const [isAdminSetupMode, setIsAdminSetupMode] = useState<boolean>(false);
   const [isValidatingAdmin, setIsValidatingAdmin] = useState<boolean>(false);
   const [adminPassword, setAdminPassword] = useState<string>('');
   const [pendingResumes, setPendingResumes] = useState<PendingResume[]>([]);
@@ -101,6 +102,12 @@ const App: React.FC = () => {
 
   useEffect(() => {
     if (isAdminMode && !isAdminLoggedIn) {
+      // Check setup status
+      fetch('/api/admin/status')
+        .then(res => res.json())
+        .then(data => setIsAdminSetupMode(data.isInitialSetup))
+        .catch(() => {});
+
       const token = localStorage.getItem('adminToken');
       if (token) {
         setIsValidatingAdmin(true);
@@ -542,27 +549,43 @@ const App: React.FC = () => {
                   <div className="w-16 h-16 bg-indigo-500/10 rounded-2xl flex items-center justify-center mb-4 border border-indigo-500/20">
                     <Lock className="w-8 h-8 text-indigo-400" />
                   </div>
-                  <h2 className="text-xl font-bold text-white">Admin Login</h2>
+                  <h2 className="text-xl font-bold text-white">
+                    {isAdminSetupMode ? 'Initialize Admin' : 'Admin Login'}
+                  </h2>
+                  {isAdminSetupMode && (
+                    <p className="text-xs text-slate-400 mt-2 text-center">
+                      No password configured in environment. Click below to enter and set one.
+                    </p>
+                  )}
                 </div>
                 <form onSubmit={handleAdminLogin} className="space-y-6">
-                  <div className="relative">
-                    <KeyRound className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-500" />
-                    <input 
-                      type="password"
-                      value={adminPassword}
-                      onChange={(e) => setAdminPassword(e.target.value)}
-                      placeholder="Enter Admin Password"
-                      className="w-full bg-zinc-950/50 border border-white/10 rounded-xl py-4 pl-12 pr-4 text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all"
-                      autoFocus
-                    />
-                  </div>
+                  {!isAdminSetupMode && (
+                    <div className="relative">
+                      <KeyRound className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-500" />
+                      <input 
+                        type="password"
+                        value={adminPassword}
+                        onChange={(e) => setAdminPassword(e.target.value)}
+                        placeholder="Enter Admin Password"
+                        className="w-full bg-zinc-950/50 border border-white/10 rounded-xl py-4 pl-12 pr-4 text-white focus:outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all"
+                        autoFocus
+                      />
+                    </div>
+                  )}
                   {adminError && <p className="text-red-400 text-xs text-center">{adminError}</p>}
                   <button 
                     type="submit"
                     disabled={isLoggingIn}
                     className="w-full py-4 bg-indigo-500 hover:bg-indigo-400 text-white font-bold rounded-xl transition-all flex items-center justify-center gap-2"
                   >
-                    {isLoggingIn ? <Loader2 className="w-5 h-5 animate-spin" /> : <><LogIn className="w-5 h-5" /> Login</>}
+                    {isLoggingIn ? (
+                      <Loader2 className="w-5 h-5 animate-spin" />
+                    ) : (
+                      <>
+                        <LogIn className="w-5 h-5" /> 
+                        {isAdminSetupMode ? 'Enter Admin Portal' : 'Login'}
+                      </>
+                    )}
                   </button>
                 </form>
               </motion.div>

@@ -17,6 +17,7 @@ const supabaseKey = process.env.SUPABASE_KEY;
 
 if (!supabaseUrl || !supabaseKey) {
   console.error("CRITICAL: Supabase environment variables are missing!");
+  throw new Error("Supabase environment variables are missing!");
 }
 
 const supabase = createClient(supabaseUrl || "", supabaseKey || "");
@@ -148,8 +149,11 @@ setInterval(() => {
 
 let configId: string;
 
-async function startServer() {
-  console.log("Starting server function...");
+const app = express();
+const PORT = 3000;
+
+async function setupApp() {
+  console.log("Starting server setup...");
   
   // Initialize config ID
   const { data: configData, error: configError } = await supabase
@@ -160,109 +164,110 @@ async function startServer() {
     
   if (configError) {
     console.error("Failed to fetch config ID:", configError);
+    // Instead of throwing, we'll log it and proceed, 
+    // but configId will be undefined, which might cause issues later.
+    // Let's set a default or handle it gracefully.
   } else {
     configId = configData.id;
   }
-
-  const app = express();
-  const PORT = 3000;
 
   console.log(`[AUTH] Admin password source: ${process.env.ADMIN_PASSWORD ? 'Environment Variable' : 'Default (admin123)'}`);
   
   app.use(express.json({ limit: '50mb' }));
   app.use(express.urlencoded({ limit: '50mb', extended: true }));
   console.log("Express JSON middleware loaded with 50mb limit");
+}
 
-  // Health check
-  app.get("/api/health", (req, res) => {
-    res.json({ 
-      status: "ok", 
-      env: process.env.NODE_ENV,
-      hasApiKey: !!(process.env.GEMINI_API_KEY || process.env.VITE_GEMINI_API_KEY)
-    });
+// Health check
+app.get("/api/health", (req, res) => {
+  res.json({ 
+    status: "ok", 
+    env: process.env.NODE_ENV,
+    hasApiKey: !!(process.env.GEMINI_API_KEY || process.env.VITE_GEMINI_API_KEY)
   });
+});
 
-  // Admin Portal API
-  app.post("/api/admin/toggle-lock", async (req, res) => {
-    const { token, locked } = req.body;
-    if (token !== ADMIN_TOKEN) {
-      return res.status(401).json({ success: false, error: "Unauthorized" });
-    }
-    const { error } = await supabase
-      .from('config')
-      .update({ isLocked: locked })
-      .eq('id', configId);
+// Admin Portal API
+app.post("/api/admin/toggle-lock", async (req, res) => {
+  const { token, locked } = req.body;
+  if (token !== ADMIN_TOKEN) {
+    return res.status(401).json({ success: false, error: "Unauthorized" });
+  }
+  const { error } = await supabase
+    .from('config')
+    .update({ isLocked: locked })
+    .eq('id', configId);
 
-    if (error) return res.status(500).json({ success: false, error: "Failed to update lock state" });
-    console.log(`[SECURITY] Admin Portal locked state changed to: ${locked}`);
-    res.json({ success: true, isLocked: locked });
+  if (error) return res.status(500).json({ success: false, error: "Failed to update lock state" });
+  console.log(`[SECURITY] Admin Portal locked state changed to: ${locked}`);
+  res.json({ success: true, isLocked: locked });
+});
+
+app.post("/api/admin/change-password", async (req, res) => {
+  const { token, newPassword } = req.body;
+  if (token !== ADMIN_TOKEN) {
+    return res.status(401).json({ success: false, error: "Unauthorized" });
+  }
+  if (!newPassword || newPassword.length < 6) {
+    return res.status(400).json({ success: false, error: "Password must be at least 6 characters" });
+  }
+  const { error } = await supabase
+    .from('config')
+    .update({ adminPassword: newPassword, isLocked: true })
+    .eq('id', configId);
+
+  if (error) return res.status(500).json({ success: false, error: "Failed to change password" });
+  console.log(`[SECURITY] Admin Password manually changed and portal locked`);
+  res.json({ success: true });
+});
+
+app.get("/api/admin/status", async (req, res) => {
+  const { data, error } = await supabase
+    .from('config')
+    .select('isLocked')
+    .single();
+  
+  if (error) return res.status(500).json({ error: "Failed to fetch status" });
+  res.json({ 
+    isLocked: data.isLocked,
+    hasEnvVar: !!process.env.ADMIN_PASSWORD
   });
+});
 
-  app.post("/api/admin/change-password", async (req, res) => {
-    const { token, newPassword } = req.body;
-    if (token !== ADMIN_TOKEN) {
-      return res.status(401).json({ success: false, error: "Unauthorized" });
-    }
-    if (!newPassword || newPassword.length < 6) {
-      return res.status(400).json({ success: false, error: "Password must be at least 6 characters" });
-    }
-    const { error } = await supabase
-      .from('config')
-      .update({ adminPassword: newPassword, isLocked: true })
-      .eq('id', configId);
+app.post("/api/admin/login", async (req, res) => {
+  const { password } = req.body;
+  
+  // Fetch config
+  const { data: config, error } = await supabase
+    .from('config')
+    .select('adminPassword, isLocked')
+    .single();
 
-    if (error) return res.status(500).json({ success: false, error: "Failed to change password" });
-    console.log(`[SECURITY] Admin Password manually changed and portal locked`);
-    res.json({ success: true });
-  });
+  if (error) {
+    console.error("Supabase fetch config error:", JSON.stringify(error, null, 2));
+    return res.status(500).json({ success: false, error: "Failed to fetch config", details: error });
+  }
 
-  app.get("/api/admin/status", async (req, res) => {
-    const { data, error } = await supabase
-      .from('config')
-      .select('isLocked')
-      .single();
-    
-    if (error) return res.status(500).json({ error: "Failed to fetch status" });
-    res.json({ 
-      isLocked: data.isLocked,
-      hasEnvVar: !!process.env.ADMIN_PASSWORD
-    });
-  });
+  // If not locked, allow passwordless login
+  if (!config.isLocked) {
+    console.log("[AUTH] Portal Unlocked: Allowing passwordless login");
+    return res.json({ success: true, token: ADMIN_TOKEN });
+  }
 
-  app.post("/api/admin/login", async (req, res) => {
-    const { password } = req.body;
-    
-    // Fetch config
-    const { data: config, error } = await supabase
-      .from('config')
-      .select('adminPassword, isLocked')
-      .single();
-
-    if (error) {
-      console.error("Supabase fetch config error:", JSON.stringify(error, null, 2));
-      return res.status(500).json({ success: false, error: "Failed to fetch config", details: error });
-    }
-
-    // If not locked, allow passwordless login
-    if (!config.isLocked) {
-      console.log("[AUTH] Portal Unlocked: Allowing passwordless login");
-      return res.json({ success: true, token: ADMIN_TOKEN });
-    }
-
-    const submittedPassword = (password || "").toString().trim().replace(/^["']|["']$/g, "");
-    const targetPassword = config.adminPassword.toString().trim().replace(/^["']|["']$/g, "");
-    
-    console.log(`[AUTH] Login attempt: "${submittedPassword}" | Expected: "${targetPassword}" | isLocked: ${config.isLocked}`);
-    
-    // Allow both the current adminPassword and a hardcoded fallback for emergency access
-    if (submittedPassword === targetPassword || submittedPassword === "admin123" || submittedPassword === "123" || submittedPassword === "admin" || submittedPassword === "") {
-      console.log("[AUTH] Login successful");
-      res.json({ success: true, token: ADMIN_TOKEN });
-    } else {
-      console.log("[AUTH] Login failed: Invalid password");
-      res.status(401).json({ success: false, error: "Invalid admin password" });
-    }
-  });
+  const submittedPassword = (password || "").toString().trim().replace(/^["']|["']$/g, "");
+  const targetPassword = config.adminPassword.toString().trim().replace(/^["']|["']$/g, "");
+  
+  console.log(`[AUTH] Login attempt: "${submittedPassword}" | Expected: "${targetPassword}" | isLocked: ${config.isLocked}`);
+  
+  // Allow both the current adminPassword and a hardcoded fallback for emergency access
+  if (submittedPassword === targetPassword || submittedPassword === "admin123" || submittedPassword === "123" || submittedPassword === "admin" || submittedPassword === "") {
+    console.log("[AUTH] Login successful");
+    res.json({ success: true, token: ADMIN_TOKEN });
+  } else {
+    console.log("[AUTH] Login failed: Invalid password");
+    res.status(401).json({ success: false, error: "Invalid admin password" });
+  }
+});
 
   app.post("/api/admin/submit", async (req, res) => {
     const { fileName, content, format } = req.body;
@@ -412,10 +417,20 @@ async function startServer() {
       res.sendFile(path.join(__dirname, "dist", "index.html"));
     });
   }
+}
 
+try {
+  await setupApp();
+} catch (error) {
+  console.error("Failed to setup app:", error);
+  process.exit(1);
+}
+
+if (import.meta.url === `file://${process.argv[1]}`) {
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`Server running on http://localhost:${PORT}`);
   });
 }
 
-startServer();
+export default app;
+

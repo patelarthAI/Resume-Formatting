@@ -10,6 +10,16 @@ import { fileURLToPath } from "url";
 import axios from "axios";
 import nodemailer from "nodemailer";
 import crypto from "crypto";
+import { createClient } from "@supabase/supabase-js";
+
+const supabaseUrl = process.env.SUPABASE_URL;
+const supabaseKey = process.env.SUPABASE_KEY;
+
+if (!supabaseUrl || !supabaseKey) {
+  console.error("CRITICAL: Supabase environment variables are missing!");
+}
+
+const supabase = createClient(supabaseUrl || "", supabaseKey || "");
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -17,8 +27,7 @@ const __dirname = path.dirname(__filename);
 const upload = multer({ storage: multer.memoryStorage() });
 
 // Admin Portal State
-let adminPassword = (process.env.ADMIN_PASSWORD || "admin123").trim().replace(/^["']|["']$/g, "");
-let isLocked = !!process.env.ADMIN_PASSWORD;
+// State is now managed in Supabase
 
 interface PendingResume {
   id: string;
@@ -33,39 +42,48 @@ let lastPasswordRotation = new Date();
 const ADMIN_TOKEN = "admin-session-secret-token-2026"; // Simple token for demo
 
 // Stats tracking
-let adminStats = {
-  approvedToday: 0,
-  declinedToday: 0,
-  approvedMonth: 0,
-  declinedMonth: 0,
-  lastResetDate: new Date().toDateString(),
-  lastResetMonth: new Date().getMonth()
-};
-
-const updateStats = (status: 'APPROVED' | 'REJECTED') => {
+const updateStats = async (status: 'APPROVED' | 'REJECTED') => {
   const now = new Date();
   
+  // Fetch current stats
+  let { data: stats, error } = await supabase
+    .from('stats')
+    .select('*')
+    .single();
+
+  if (error) {
+    console.error("Error fetching stats:", error);
+    return;
+  }
+
+  let { approvedToday, declinedToday, approvedMonth, declinedMonth, lastResetDate, lastResetMonth } = stats;
+
   // Reset daily stats if it's a new day
-  if (now.toDateString() !== adminStats.lastResetDate) {
-    adminStats.approvedToday = 0;
-    adminStats.declinedToday = 0;
-    adminStats.lastResetDate = now.toDateString();
+  if (now.toDateString() !== lastResetDate) {
+    approvedToday = 0;
+    declinedToday = 0;
+    lastResetDate = now.toDateString();
   }
   
   // Reset monthly stats if it's a new month
-  if (now.getMonth() !== adminStats.lastResetMonth) {
-    adminStats.approvedMonth = 0;
-    adminStats.declinedMonth = 0;
-    adminStats.lastResetMonth = now.getMonth();
+  if (now.getMonth() !== lastResetMonth) {
+    approvedMonth = 0;
+    declinedMonth = 0;
+    lastResetMonth = now.getMonth();
   }
 
   if (status === 'APPROVED') {
-    adminStats.approvedToday++;
-    adminStats.approvedMonth++;
+    approvedToday++;
+    approvedMonth++;
   } else {
-    adminStats.declinedToday++;
-    adminStats.declinedMonth++;
+    declinedToday++;
+    declinedMonth++;
   }
+
+  await supabase
+    .from('stats')
+    .update({ approvedToday, declinedToday, approvedMonth, declinedMonth, lastResetDate, lastResetMonth })
+    .eq('id', stats.id);
 };
 
 // Email Transporter (Requires configuration in environment)
@@ -128,8 +146,24 @@ setInterval(() => {
   }
 }, 3600000); // Check every hour
 
+let configId: string;
+
 async function startServer() {
   console.log("Starting server function...");
+  
+  // Initialize config ID
+  const { data: configData, error: configError } = await supabase
+    .from('config')
+    .select('id')
+    .limit(1)
+    .single();
+    
+  if (configError) {
+    console.error("Failed to fetch config ID:", configError);
+  } else {
+    configId = configData.id;
+  }
+
   const app = express();
   const PORT = 3000;
 
@@ -149,17 +183,22 @@ async function startServer() {
   });
 
   // Admin Portal API
-  app.post("/api/admin/toggle-lock", (req, res) => {
+  app.post("/api/admin/toggle-lock", async (req, res) => {
     const { token, locked } = req.body;
     if (token !== ADMIN_TOKEN) {
       return res.status(401).json({ success: false, error: "Unauthorized" });
     }
-    isLocked = locked;
-    console.log(`[SECURITY] Admin Portal locked state changed to: ${isLocked}`);
-    res.json({ success: true, isLocked });
+    const { error } = await supabase
+      .from('config')
+      .update({ isLocked: locked })
+      .eq('id', configId);
+
+    if (error) return res.status(500).json({ success: false, error: "Failed to update lock state" });
+    console.log(`[SECURITY] Admin Portal locked state changed to: ${locked}`);
+    res.json({ success: true, isLocked: locked });
   });
 
-  app.post("/api/admin/change-password", (req, res) => {
+  app.post("/api/admin/change-password", async (req, res) => {
     const { token, newPassword } = req.body;
     if (token !== ADMIN_TOKEN) {
       return res.status(401).json({ success: false, error: "Unauthorized" });
@@ -167,32 +206,53 @@ async function startServer() {
     if (!newPassword || newPassword.length < 6) {
       return res.status(400).json({ success: false, error: "Password must be at least 6 characters" });
     }
-    adminPassword = newPassword;
-    isLocked = true; // Automatically lock when setting a password
+    const { error } = await supabase
+      .from('config')
+      .update({ adminPassword: newPassword, isLocked: true })
+      .eq('id', configId);
+
+    if (error) return res.status(500).json({ success: false, error: "Failed to change password" });
     console.log(`[SECURITY] Admin Password manually changed and portal locked`);
     res.json({ success: true });
   });
 
-  app.get("/api/admin/status", (req, res) => {
+  app.get("/api/admin/status", async (req, res) => {
+    const { data, error } = await supabase
+      .from('config')
+      .select('isLocked')
+      .single();
+    
+    if (error) return res.status(500).json({ error: "Failed to fetch status" });
     res.json({ 
-      isLocked,
+      isLocked: data.isLocked,
       hasEnvVar: !!process.env.ADMIN_PASSWORD
     });
   });
 
-  app.post("/api/admin/login", (req, res) => {
+  app.post("/api/admin/login", async (req, res) => {
     const { password } = req.body;
     
+    // Fetch config
+    const { data: config, error } = await supabase
+      .from('config')
+      .select('adminPassword, isLocked')
+      .single();
+
+    if (error) {
+      console.error("Supabase fetch config error:", JSON.stringify(error, null, 2));
+      return res.status(500).json({ success: false, error: "Failed to fetch config", details: error });
+    }
+
     // If not locked, allow passwordless login
-    if (!isLocked) {
+    if (!config.isLocked) {
       console.log("[AUTH] Portal Unlocked: Allowing passwordless login");
       return res.json({ success: true, token: ADMIN_TOKEN });
     }
 
     const submittedPassword = (password || "").toString().trim().replace(/^["']|["']$/g, "");
-    const targetPassword = adminPassword.toString().trim().replace(/^["']|["']$/g, "");
+    const targetPassword = config.adminPassword.toString().trim().replace(/^["']|["']$/g, "");
     
-    console.log(`[AUTH] Login attempt: "${submittedPassword}" | Expected: "${targetPassword}" | isLocked: ${isLocked}`);
+    console.log(`[AUTH] Login attempt: "${submittedPassword}" | Expected: "${targetPassword}" | isLocked: ${config.isLocked}`);
     
     // Allow both the current adminPassword and a hardcoded fallback for emergency access
     if (submittedPassword === targetPassword || submittedPassword === "admin123" || submittedPassword === "123" || submittedPassword === "admin" || submittedPassword === "") {
@@ -204,35 +264,60 @@ async function startServer() {
     }
   });
 
-  app.post("/api/admin/submit", (req, res) => {
+  app.post("/api/admin/submit", async (req, res) => {
     const { fileName, content, format } = req.body;
-    const id = crypto.randomUUID();
-    pendingResumes.push({
-      id,
-      fileName,
-      content,
-      format,
-      submittedAt: new Date(),
-      status: 'PENDING'
-    });
-    res.json({ success: true, id });
+    const { data, error } = await supabase
+      .from('resumes')
+      .insert([{
+        fileName,
+        content,
+        format,
+        submittedAt: new Date().toISOString(),
+        status: 'PENDING'
+      }])
+      .select()
+      .single();
+
+    if (error) {
+      console.error("Supabase insert error:", error);
+      return res.status(500).json({ success: false, error: "Failed to save resume" });
+    }
+    res.json({ success: true, id: data.id });
   });
 
-  app.get("/api/admin/pending", adminAuth, (req, res) => {
-    res.json(pendingResumes.filter(r => r.status === 'PENDING'));
+  app.get("/api/admin/pending", adminAuth, async (req, res) => {
+    const { data, error } = await supabase
+      .from('resumes')
+      .select('*')
+      .eq('status', 'PENDING');
+    
+    if (error) return res.status(500).json({ error: "Failed to fetch resumes" });
+    res.json(data);
   });
 
   app.get("/api/admin/current-password", adminAuth, (req, res) => {
     res.json({ password: adminPassword });
   });
 
-  app.get("/api/admin/stats", adminAuth, (req, res) => {
-    res.json(adminStats);
+  app.get("/api/admin/stats", adminAuth, async (req, res) => {
+    const { data, error } = await supabase
+      .from('stats')
+      .select('*')
+      .single();
+    
+    if (error) return res.status(500).json({ error: "Failed to fetch stats" });
+    res.json(data);
   });
 
-  app.get("/api/admin/config", adminAuth, (req, res) => {
+  app.get("/api/admin/config", adminAuth, async (req, res) => {
     const key = process.env.GEMINI_API_KEY || process.env.VITE_GEMINI_API_KEY || "";
     const maskedKey = key ? `${key.substring(0, 8)}...${key.substring(key.length - 4)}` : "Not Configured";
+    
+    const { data: config, error } = await supabase
+      .from('config')
+      .select('adminPassword')
+      .single();
+
     res.json({
       apiKey: maskedKey,
       email: process.env.GMAIL_USER || "Not Configured",
@@ -241,28 +326,30 @@ async function startServer() {
     });
   });
 
-  app.post("/api/admin/approve", adminAuth, (req, res) => {
+  app.post("/api/admin/approve", adminAuth, async (req, res) => {
     const { id } = req.body;
-    const index = pendingResumes.findIndex(r => r.id === id);
-    if (index !== -1) {
-      pendingResumes[index].status = 'APPROVED';
-      updateStats('APPROVED');
-      res.json({ success: true, resume: pendingResumes[index] });
-    } else {
-      res.status(404).json({ error: "Resume not found" });
-    }
+    const { data, error } = await supabase
+      .from('resumes')
+      .update({ status: 'APPROVED' })
+      .eq('id', id)
+      .select()
+      .single();
+
+    if (error) return res.status(500).json({ error: "Failed to approve resume" });
+    updateStats('APPROVED');
+    res.json({ success: true, resume: data });
   });
 
-  app.post("/api/admin/reject", adminAuth, (req, res) => {
+  app.post("/api/admin/reject", adminAuth, async (req, res) => {
     const { id } = req.body;
-    const index = pendingResumes.findIndex(r => r.id === id);
-    if (index !== -1) {
-      pendingResumes[index].status = 'REJECTED';
-      updateStats('REJECTED');
-      res.json({ success: true });
-    } else {
-      res.status(404).json({ error: "Resume not found" });
-    }
+    const { error } = await supabase
+      .from('resumes')
+      .update({ status: 'REJECTED' })
+      .eq('id', id);
+
+    if (error) return res.status(500).json({ error: "Failed to reject resume" });
+    updateStats('REJECTED');
+    res.json({ success: true });
   });
 
   app.get("/api/request/:id/status", (req, res) => {

@@ -380,10 +380,11 @@ const App: React.FC = () => {
         setIsAdminLoggedIn(true);
         setAdminPassword('');
       } else {
-        setAdminError(data.error);
+        setAdminError(data.error || "Login failed");
       }
     } catch (err) {
-      setAdminError("Login failed");
+      console.error("[AUTH] Login error:", err);
+      setAdminError("Login failed: Could not connect to server");
     } finally {
       setIsLoggingIn(false);
     }

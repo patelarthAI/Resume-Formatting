@@ -17,7 +17,7 @@ const upload = multer({ storage: multer.memoryStorage() });
 
 // Admin Portal State
 let adminPassword = (process.env.ADMIN_PASSWORD || "admin123").trim().replace(/^["']|["']$/g, "");
-let isInitialSetup = !process.env.ADMIN_PASSWORD;
+let isLocked = !!process.env.ADMIN_PASSWORD;
 
 interface PendingResume {
   id: string;
@@ -148,6 +148,16 @@ async function startServer() {
   });
 
   // Admin Portal API
+  app.post("/api/admin/toggle-lock", (req, res) => {
+    const { token, locked } = req.body;
+    if (token !== ADMIN_TOKEN) {
+      return res.status(401).json({ success: false, error: "Unauthorized" });
+    }
+    isLocked = locked;
+    console.log(`[SECURITY] Admin Portal locked state changed to: ${isLocked}`);
+    res.json({ success: true, isLocked });
+  });
+
   app.post("/api/admin/change-password", (req, res) => {
     const { token, newPassword } = req.body;
     if (token !== ADMIN_TOKEN) {
@@ -157,14 +167,14 @@ async function startServer() {
       return res.status(400).json({ success: false, error: "Password must be at least 6 characters" });
     }
     adminPassword = newPassword;
-    isInitialSetup = false; // Once changed, it's no longer initial setup
-    console.log(`[SECURITY] Admin Password manually changed`);
+    isLocked = true; // Automatically lock when setting a password
+    console.log(`[SECURITY] Admin Password manually changed and portal locked`);
     res.json({ success: true });
   });
 
   app.get("/api/admin/status", (req, res) => {
     res.json({ 
-      isInitialSetup,
+      isLocked,
       hasEnvVar: !!process.env.ADMIN_PASSWORD
     });
   });
@@ -172,9 +182,9 @@ async function startServer() {
   app.post("/api/admin/login", (req, res) => {
     const { password } = req.body;
     
-    // In initial setup mode (no ENV var), allow login without password
-    if (isInitialSetup) {
-      console.log("[AUTH] Setup Mode: Allowing passwordless login");
+    // If not locked, allow passwordless login
+    if (!isLocked) {
+      console.log("[AUTH] Portal Unlocked: Allowing passwordless login");
       return res.json({ success: true, token: ADMIN_TOKEN });
     }
 

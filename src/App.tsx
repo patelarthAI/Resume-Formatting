@@ -78,7 +78,7 @@ const App: React.FC = () => {
   }, [appState]);
   const [isAdminMode, setIsAdminMode] = useState<boolean>(false);
   const [isAdminLoggedIn, setIsAdminLoggedIn] = useState<boolean>(false);
-  const [isAdminSetupMode, setIsAdminSetupMode] = useState<boolean>(false);
+  const [isAdminLocked, setIsAdminLocked] = useState<boolean>(false);
   const [isValidatingAdmin, setIsValidatingAdmin] = useState<boolean>(false);
   const [adminPassword, setAdminPassword] = useState<string>('');
   const [pendingResumes, setPendingResumes] = useState<PendingResume[]>([]);
@@ -105,7 +105,7 @@ const App: React.FC = () => {
       // Check setup status
       fetch('/api/admin/status')
         .then(res => res.json())
-        .then(data => setIsAdminSetupMode(data.isInitialSetup))
+        .then(data => setIsAdminLocked(data.isLocked))
         .catch(() => {});
 
       const token = localStorage.getItem('adminToken');
@@ -550,16 +550,16 @@ const App: React.FC = () => {
                     <Lock className="w-8 h-8 text-indigo-400" />
                   </div>
                   <h2 className="text-xl font-bold text-white">
-                    {isAdminSetupMode ? 'Initialize Admin' : 'Admin Login'}
+                    {isAdminLocked ? 'Admin Login' : 'Admin Portal'}
                   </h2>
-                  {isAdminSetupMode && (
+                  {isAdminLocked && (
                     <p className="text-xs text-slate-400 mt-2 text-center">
-                      No password configured in environment. Click below to enter and set one.
+                      Admin portal is locked. Please enter your password.
                     </p>
                   )}
                 </div>
                 <form onSubmit={handleAdminLogin} className="space-y-6">
-                  {!isAdminSetupMode && (
+                  {isAdminLocked && (
                     <div className="relative">
                       <KeyRound className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-500" />
                       <input 
@@ -583,7 +583,7 @@ const App: React.FC = () => {
                     ) : (
                       <>
                         <LogIn className="w-5 h-5" /> 
-                        {isAdminSetupMode ? 'Enter Admin Portal' : 'Login'}
+                        {isAdminLocked ? 'Login' : 'Enter Admin Portal'}
                       </>
                     )}
                   </button>
@@ -644,6 +644,22 @@ const App: React.FC = () => {
                     API Key: <span className="font-mono text-slate-400">{adminConfig.apiKey}</span>
                   </div>
                 )}
+                <button 
+                  onClick={async () => {
+                    const token = localStorage.getItem('adminToken');
+                    const res = await fetch('/api/admin/toggle-lock', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ token, locked: !isAdminLocked })
+                    });
+                    if (res.ok) {
+                      setIsAdminLocked(!isAdminLocked);
+                    }
+                  }}
+                  className={`flex items-center gap-2 text-sm font-bold transition-colors ${isAdminLocked ? 'text-red-400 hover:text-red-300' : 'text-emerald-400 hover:text-emerald-300'}`}
+                >
+                  {isAdminLocked ? 'Locked' : 'Unlocked'}
+                </button>
                 <button 
                   onClick={handleAdminLogout}
                   className="flex items-center gap-2 text-slate-500 hover:text-red-400 transition-colors text-sm font-bold ml-auto"

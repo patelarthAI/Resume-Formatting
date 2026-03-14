@@ -6,14 +6,10 @@ import WordExtractor from "word-extractor";
 const Extractor = (WordExtractor as any).default || WordExtractor;
 import multer from "multer";
 import path from "path";
-import { fileURLToPath } from "url";
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 
 const upload = multer({ storage: multer.memoryStorage() });
 
-import { supabaseAdmin } from "./server/supabase.ts";
+import { supabaseAdmin } from "./server/supabase";
 
 const app = express();
 const PORT = 3000;
@@ -162,38 +158,39 @@ async function setupApp() {
     }
   });
 
-  // Vite middleware for development
-  if (process.env.NODE_ENV !== "production") {
-    try {
-      const { createServer: createViteServer } = await import("vite");
-      const vite = await createViteServer({
-        server: { middlewareMode: true },
-        appType: "spa",
+  if (!process.env.VERCEL) {
+    // Vite middleware for development
+    if (process.env.NODE_ENV !== "production") {
+      try {
+        const viteModule = "vite";
+        const { createServer: createViteServer } = await import(viteModule);
+        const vite = await createViteServer({
+          server: { middlewareMode: true },
+          appType: "spa",
+        });
+        app.use(vite.middlewares);
+        console.log("Vite middleware loaded successfully");
+      } catch (e) {
+        console.error("Failed to load Vite middleware:", e);
+      }
+    } else {
+      // Serve static files in production
+      app.use(express.static(path.join(process.cwd(), "dist")));
+      app.get("*all", (req, res) => {
+        res.sendFile(path.join(process.cwd(), "dist", "index.html"));
       });
-      app.use(vite.middlewares);
-      console.log("Vite middleware loaded successfully");
-    } catch (e) {
-      console.error("Failed to load Vite middleware:", e);
     }
-  } else {
-    // Serve static files in production
-    app.use(express.static(path.join(__dirname, "dist")));
-    app.get("*all", (req, res) => {
-      res.sendFile(path.join(__dirname, "dist", "index.html"));
+
+    app.listen(PORT, "0.0.0.0", () => {
+      console.log(`Server running on http://localhost:${PORT}`);
     });
   }
-
-  app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server running on http://localhost:${PORT}`);
-  });
 }
 
-try {
-  await setupApp();
-} catch (error) {
+setupApp().catch(error => {
   console.error("Failed to setup app:", error);
   process.exit(1);
-}
+});
 
 export default app;
 

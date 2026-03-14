@@ -23,6 +23,7 @@
       "@/*": ["src/*"]
     },
     "allowImportingTsExtensions": true,
+    "esModuleInterop": true,
     "noEmit": true
   },
   "include": ["src"]

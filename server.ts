@@ -1,7 +1,6 @@
 import 'dotenv/config';
 import express from "express";
 console.log("Server starting...");
-import { createServer as createViteServer } from "vite";
 import WordExtractor from "word-extractor";
 // Fallback for some environments
 const Extractor = (WordExtractor as any).default || WordExtractor;
@@ -14,7 +13,7 @@ const __dirname = path.dirname(__filename);
 
 const upload = multer({ storage: multer.memoryStorage() });
 
-import { supabaseAdmin } from "./server/supabase.js";
+import { supabaseAdmin } from "./server/supabase.ts";
 
 const app = express();
 const PORT = 3000;
@@ -166,6 +165,7 @@ async function setupApp() {
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
     try {
+      const { createServer: createViteServer } = await import("vite");
       const vite = await createViteServer({
         server: { middlewareMode: true },
         appType: "spa",

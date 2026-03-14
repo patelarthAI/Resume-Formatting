@@ -1,14 +1,30 @@
 import React, { useState, useCallback, useEffect } from 'react';
-import { UploadCloud, FileText, Loader2, AlertTriangle, CheckCircle, Sparkles, ArrowRight } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { AppState, ResumeData, ResumeFormat } from '@/types';
-import { extractResumeData } from '@/services/geminiService';
+import { extractResumeData, getUsageStats } from '@/services/geminiService';
 import { generateResumeDoc } from '@/services/docxService';
 import ResumePreview from '@/components/ResumePreview';
-import FileSaver from 'file-saver';
-import { LayoutTemplate } from 'lucide-react';
-// @ts-ignore
-import mammoth from 'mammoth';
+import AdminDashboard from '@/components/AdminDashboard';
+import { saveAs } from 'file-saver';
+import { 
+  LayoutTemplate, 
+  Database, 
+  UploadCloud, 
+  FileText, 
+  AlertTriangle, 
+  CheckCircle, 
+  Sparkles, 
+  ArrowRight,
+  ShieldCheck,
+  Clock
+} from 'lucide-react';
+import * as mammoth from 'mammoth';
+
+interface StagedContent {
+  text?: string;
+  base64?: string;
+  mimeType: string;
+}
 
 const App: React.FC = () => {
   const [appState, setAppState] = useState<AppState>(AppState.IDLE);
@@ -17,6 +33,10 @@ const App: React.FC = () => {
   const [errorMsg, setErrorMsg] = useState<string>('');
   const [dragActive, setDragActive] = useState<boolean>(false);
   const [selectedFormat, setSelectedFormat] = useState<ResumeFormat>(ResumeFormat.CLASSIC_PROFESSIONAL);
+  const [usePro, setUsePro] = useState<boolean>(false);
+  const [stats, setStats] = useState(getUsageStats(usePro));
+  const [stagedContent, setStagedContent] = useState<StagedContent | null>(null);
+  const [showAdmin, setShowAdmin] = useState(false);
 
   useEffect(() => {
     fetch('/api/health')
@@ -31,7 +51,7 @@ const App: React.FC = () => {
 
     setFileName(file.name);
     setErrorMsg('');
-    setAppState(AppState.PROCESSING);
+    setAppState(AppState.STAGING);
 
     try {
       // 1. DOCX Handling
@@ -40,15 +60,13 @@ const App: React.FC = () => {
         file.name.endsWith('.docx')
       ) {
         const arrayBuffer = await file.arrayBuffer();
-        // Extract raw text from DOCX
-        const result = await mammoth.extractRawText({ arrayBuffer });
+        const mammothInstance = (mammoth as any).default || mammoth;
+        const result = await mammothInstance.extractRawText({ arrayBuffer });
         const text = result.value;
         if (!text || text.trim().length === 0) {
           throw new Error("Could not extract text from this Word document.");
         }
-        const extractedData = await extractResumeData({ text, mimeType: 'text/plain', format: selectedFormat });
-        setResumeData(extractedData);
-        setAppState(AppState.REVIEW);
+        setStagedContent({ text, mimeType: 'text/plain' });
         return;
       }
 
@@ -71,9 +89,7 @@ const App: React.FC = () => {
         }
 
         const { text } = await response.json();
-        const extractedData = await extractResumeData({ text, mimeType: 'text/plain', format: selectedFormat });
-        setResumeData(extractedData);
-        setAppState(AppState.REVIEW);
+        setStagedContent({ text, mimeType: 'text/plain' });
         return;
       }
 
@@ -86,9 +102,7 @@ const App: React.FC = () => {
         file.name.endsWith('.rtf')
       ) {
         const text = await file.text();
-        const extractedData = await extractResumeData({ text, mimeType: 'text/plain', format: selectedFormat });
-        setResumeData(extractedData);
-        setAppState(AppState.REVIEW);
+        setStagedContent({ text, mimeType: 'text/plain' });
         return;
       }
 
@@ -100,63 +114,74 @@ const App: React.FC = () => {
           reader.readAsDataURL(file);
           reader.onload = () => {
             const result = reader.result as string;
-            // Remove Data URL prefix (e.g., "data:application/pdf;base64,")
             const base64 = result.split(',')[1];
             resolve(base64);
           };
           reader.onerror = (error) => reject(error);
         });
 
-        const extractedData = await extractResumeData({ base64: base64Data, mimeType: file.type, format: selectedFormat });
-        setResumeData(extractedData);
-        setAppState(AppState.REVIEW);
+        setStagedContent({ base64: base64Data, mimeType: file.type });
         return;
       }
 
-      // 4. Unsupported
       throw new Error("Unsupported file format. Please upload DOCX, DOC, PDF, Text, or Image files.");
 
     } catch (err: any) {
-      console.error(err);
-      setErrorMsg(err.message || "Failed to process the resume. Please check your API key or try a different file.");
+      console.error("Extraction Error:", err);
+      setErrorMsg(err.message || "Failed to process the resume.");
       setAppState(AppState.ERROR);
     }
-  }, []);
+  }, [selectedFormat, usePro]);
+
+  const handleSubmitForApproval = async () => {
+    if (!stagedContent) return;
+    
+    setAppState(AppState.PROCESSING);
+    try {
+      // Call the new submit endpoint
+      const response = await fetch('/api/submit', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          content: stagedContent,
+          userId: null // Replace with actual user ID if auth is added for users
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to submit resume');
+      }
+
+      // Transition to waiting approval state
+      setAppState(AppState.WAITING_APPROVAL);
+    } catch (err: any) {
+      setErrorMsg(err.message);
+      setAppState(AppState.ERROR);
+    }
+  };
 
   const onDragEnter = (e: React.DragEvent) => {
     e.preventDefault();
-    e.stopPropagation();
     setDragActive(true);
   };
 
   const onDragLeave = (e: React.DragEvent) => {
     e.preventDefault();
-    e.stopPropagation();
     setDragActive(false);
   };
 
   const onDragOver = (e: React.DragEvent) => {
     e.preventDefault();
-    e.stopPropagation();
   };
 
   const onDrop = (e: React.DragEvent) => {
     e.preventDefault();
-    e.stopPropagation();
     setDragActive(false);
     if (e.dataTransfer.files && e.dataTransfer.files[0]) {
       handleFileChange(e.dataTransfer.files[0]);
-    }
-  };
-
-  const handleDownload = async () => {
-    if (!resumeData) return;
-    try {
-      const blob = await generateResumeDoc(resumeData, selectedFormat);
-      FileSaver.saveAs(blob, `Formatted_${fileName.replace(/\.[^/.]+$/, "")}.docx`);
-    } catch (err) {
-      console.error(err);
-      alert("Failed to generate DOCX file.");
     }
   };
 
@@ -177,12 +202,26 @@ const App: React.FC = () => {
 
       <div className="relative z-10 flex flex-col items-center py-16 px-4 sm:px-6 lg:px-8">
         {/* Header */}
-        <motion.div 
-          initial={{ opacity: 0, y: -20 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.6, ease: "easeOut" }}
-          className="text-center mb-16 max-w-3xl"
-        >
+        <div className="absolute top-6 right-6 z-50">
+          <button
+            onClick={() => setShowAdmin(!showAdmin)}
+            className="flex items-center gap-2 px-4 py-2 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 text-slate-300 transition-colors"
+          >
+            <ShieldCheck className="w-4 h-4" />
+            <span className="text-sm font-medium">{showAdmin ? 'Exit Admin' : 'Admin'}</span>
+          </button>
+        </div>
+
+        {showAdmin ? (
+          <AdminDashboard />
+        ) : (
+          <>
+            <motion.div 
+              initial={{ opacity: 0, y: -20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.6, ease: "easeOut" }}
+              className="text-center mb-16 max-w-3xl"
+            >
           <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/5 border border-white/10 backdrop-blur-md mb-6">
             <Sparkles className="w-4 h-4 text-indigo-400" />
             <span className="text-xs font-medium text-indigo-200 tracking-wide uppercase">Next-Gen Resume Intelligence</span>
@@ -219,6 +258,18 @@ const App: React.FC = () => {
               >
                 <Sparkles className="w-4 h-4" />
                 Modern Executive
+              </button>
+            </div>
+
+            <div className="mt-6 flex items-center gap-3">
+              <button
+                onClick={() => setUsePro(!usePro)}
+                className={`flex items-center gap-2 px-4 py-2 rounded-full border transition-all ${usePro ? 'bg-amber-500/20 border-amber-500 text-amber-200 shadow-lg shadow-amber-500/20' : 'bg-white/5 border-white/10 text-slate-500 hover:bg-white/10'}`}
+              >
+                <Database className={`w-4 h-4 ${usePro ? 'text-amber-400' : 'text-slate-500'}`} />
+                <span className="text-xs font-bold uppercase tracking-wider">
+                  {usePro ? "Pro Mode Active (Gemini 3.1 Pro)" : "Standard Mode (Gemini 3 Flash)"}
+                </span>
               </button>
             </div>
           </motion.div>
@@ -260,7 +311,6 @@ const App: React.FC = () => {
                         <UploadCloud className="w-10 h-10 text-indigo-400" />
                       </div>
                     </div>
-                    {/* Glow effect */}
                     <div className="absolute inset-0 bg-indigo-500/30 blur-2xl -z-10" />
                   </div>
                   
@@ -280,12 +330,85 @@ const App: React.FC = () => {
                   <motion.div 
                     initial={{ opacity: 0, y: 10 }}
                     animate={{ opacity: 1, y: 0 }}
-                    className="mt-6 p-4 bg-red-500/10 border border-red-500/20 rounded-xl flex items-start gap-3 backdrop-blur-md"
+                    className="mt-6 p-6 bg-red-500/10 border border-red-500/20 rounded-2xl flex flex-col gap-4 backdrop-blur-md"
                   >
-                    <AlertTriangle className="w-5 h-5 text-red-400 flex-shrink-0 mt-0.5" />
-                    <p className="text-sm text-red-200">{errorMsg}</p>
+                    <div className="flex items-start gap-3">
+                      <AlertTriangle className="w-6 h-6 text-red-400 flex-shrink-0 mt-0.5" />
+                      <div className="flex flex-col gap-1">
+                        <h4 className="font-bold text-red-200">Processing Issue</h4>
+                        <p className="text-sm text-red-100/80 leading-relaxed">{errorMsg}</p>
+                      </div>
+                    </div>
+                    <div className="flex justify-end">
+                      <button 
+                        onClick={handleReset}
+                        className="px-4 py-2 bg-red-500/20 hover:bg-red-500/30 text-red-200 text-xs font-bold uppercase tracking-widest rounded-lg transition-colors border border-red-500/30"
+                      >
+                        Try Another File
+                      </button>
+                    </div>
                   </motion.div>
                 )}
+              </motion.div>
+            )}
+
+            {appState === AppState.STAGING && (
+              <motion.div 
+                key="staging"
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -20 }}
+                className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-3xl p-12 flex flex-col items-center text-center"
+              >
+                <div className="w-20 h-20 bg-emerald-500/10 rounded-2xl flex items-center justify-center mb-6 border border-emerald-500/20">
+                  <CheckCircle className="w-10 h-10 text-emerald-400" />
+                </div>
+                <h2 className="text-2xl font-bold text-white mb-2">File Ready for Processing</h2>
+                <p className="text-slate-400 mb-8 max-w-sm">
+                  Document <span className="text-indigo-300 font-mono">"{fileName}"</span> has been prepared. 
+                  Submit it to format your resume.
+                </p>
+                
+                <div className="flex gap-4">
+                  <button 
+                    onClick={handleReset}
+                    className="px-6 py-3 bg-white/5 hover:bg-white/10 border border-white/10 text-slate-300 font-semibold rounded-xl transition-all"
+                  >
+                    Cancel
+                  </button>
+                  <button 
+                    onClick={handleSubmitForApproval}
+                    className="px-10 py-3 bg-indigo-500 hover:bg-indigo-400 text-white font-bold rounded-xl shadow-lg shadow-indigo-500/20 transition-all flex items-center gap-2 active:scale-[0.98]"
+                  >
+                    <ArrowRight className="w-5 h-5" />
+                    Format Resume
+                  </button>
+                </div>
+              </motion.div>
+            )}
+
+            {appState === AppState.WAITING_APPROVAL && (
+              <motion.div 
+                key="waiting"
+                initial={{ opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.95 }}
+                className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-3xl p-12 flex flex-col items-center text-center"
+              >
+                <div className="w-20 h-20 bg-amber-500/10 rounded-2xl flex items-center justify-center mb-6 border border-amber-500/20">
+                  <Clock className="w-10 h-10 text-amber-400" />
+                </div>
+                <h2 className="text-2xl font-bold text-white mb-2">Pending Admin Approval</h2>
+                <p className="text-slate-400 mb-8 max-w-sm">
+                  Your resume has been submitted and is waiting for an administrator to approve it. 
+                  Once approved, the formatting process will begin automatically.
+                </p>
+                <button 
+                  onClick={handleReset}
+                  className="px-6 py-3 bg-white/5 hover:bg-white/10 border border-white/10 text-slate-300 font-semibold rounded-xl transition-all"
+                >
+                  Submit Another Resume
+                </button>
               </motion.div>
             )}
 
@@ -303,9 +426,9 @@ const App: React.FC = () => {
                       <FileText className="w-8 h-8 text-indigo-400" />
                     </div>
                  </div>
-                 <h2 className="text-3xl font-bold text-white mb-4">Analyzing Structure</h2>
+                 <h2 className="text-3xl font-bold text-white mb-4">Processing Resume</h2>
                  <p className="text-slate-400 max-w-md animate-pulse font-light">
-                   ArthFormat AI is deconstructing your document layout and extracting semantic data...
+                   Your resume is being formatted...
                  </p>
               </motion.div>
             )}
@@ -320,22 +443,18 @@ const App: React.FC = () => {
                 <ResumePreview 
                   key={fileName}
                   data={resumeData} 
-                  onDownload={() => {}} // Download handled internally by ResumePreview
+                  onDownload={() => {}} 
                   onReset={handleReset} 
                   onUpdate={setResumeData}
                   selectedFormat={selectedFormat}
+                  usePro={usePro}
                 />
               </motion.div>
             )}
           </AnimatePresence>
         </div>
-        
-        {/* Footer */}
-        <footer className="mt-24 text-center">
-          <p className="text-sm text-slate-500 font-mono">
-            ArthFormat AI &bull; Powered by Gemini 3 Pro &bull; Secure Client-Side Processing
-          </p>
-        </footer>
+        </>
+        )}
       </div>
     </div>
   );

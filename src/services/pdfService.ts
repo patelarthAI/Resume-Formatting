@@ -1,17 +1,21 @@
-import pdfMake from "pdfmake/build/pdfmake";
-import pdfFonts from "pdfmake/build/vfs_fonts";
+import * as pdfMake from "pdfmake/build/pdfmake";
+import * as pdfFonts from "pdfmake/build/vfs_fonts";
 import { ResumeData, ResumeFormat } from "@/types";
 
 // Initialize fonts
-// @ts-ignore
-if (pdfFonts && pdfFonts.pdfMake && pdfFonts.pdfMake.vfs) {
-  // @ts-ignore
-  pdfMake.vfs = pdfFonts.pdfMake.vfs;
-} else if (pdfFonts && (pdfFonts as any).vfs) {
-  // @ts-ignore
-  pdfMake.vfs = (pdfFonts as any).vfs;
-} else {
-  console.warn("Could not find vfs in pdfFonts", pdfFonts);
+try {
+  const pm = (pdfMake as any).default || pdfMake;
+  const pf = (pdfFonts as any).default || pdfFonts;
+  
+  if (pm && pf) {
+    if (pf.pdfMake && pf.pdfMake.vfs) {
+      pm.vfs = pf.pdfMake.vfs;
+    } else if (pf.vfs) {
+      pm.vfs = pf.vfs;
+    }
+  }
+} catch (e) {
+  console.error("Failed to initialize pdfMake fonts", e);
 }
 
 // Helper to format title with colon
@@ -397,5 +401,6 @@ export const generateResumePDF = (data: ResumeData, format: ResumeFormat | strin
     }
   };
 
-  pdfMake.createPdf(docDefinition).download(`Formatted_${data.fullName.replace(/\s+/g, '_')}_${isModern ? 'Modern' : 'Classic'}.pdf`);
+  const pm = (pdfMake as any).default || pdfMake;
+  pm.createPdf(docDefinition).download(`Formatted_${data.fullName.replace(/\s+/g, '_')}_${isModern ? 'Modern' : 'Classic'}.pdf`);
 };

@@ -9,7 +9,7 @@ import path from "path";
 
 const upload = multer({ storage: multer.memoryStorage() });
 
-import { supabaseAdmin } from "./server/supabase";
+import { supabaseAdmin } from "./server/supabase.js";
 
 const app = express();
 const PORT = 3000;

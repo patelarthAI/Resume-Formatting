@@ -257,7 +257,8 @@ const ResumePreview: React.FC<ResumePreviewProps> = ({ data, onDownload, onReset
   const handleDownloadDOCX = async () => {
     try {
       const blob = await generateResumeDoc(data, selectedFormat);
-      saveAs(blob, `Resume_${data.fullName.replace(/\s+/g, "_")}_${selectedFormat === ResumeFormat.MODERN_EXECUTIVE ? 'Modern' : 'Classic'}.docx`);
+      const fileName = `${data.fullName.trim().replace(/\s+/g, '.')}.Formatted.docx`;
+      saveAs(blob, fileName);
     } catch (err) {
       console.error("DOCX generation failed", err);
       alert("Failed to generate DOCX.");
@@ -426,9 +427,11 @@ const ResumePreview: React.FC<ResumePreviewProps> = ({ data, onDownload, onReset
                         {styles.jobLayout === 'modern' ? (
                             // Modern Layout: Date -> Company -> Title
                             <>
-                                <div style={{ fontWeight: 'bold', fontSize: styles.fontSizeBody, color: black, marginBottom: '2px' }}>
-                                    {formatModernDate(exp.dates)}
-                                </div>
+                                {exp.dates && exp.dates !== "undefined" && (
+                                  <div style={{ fontWeight: 'bold', fontSize: styles.fontSizeBody, color: black, marginBottom: '2px' }}>
+                                      {formatModernDate(exp.dates)}
+                                  </div>
+                                )}
                                 <div style={{ fontWeight: 'bold', fontSize: styles.fontSizeBody, color: black, marginBottom: '2px' }}>
                                     {exp.company}{exp.location ? `, ${formatLocation(exp.location)}` : ''}
                                 </div>
@@ -443,7 +446,9 @@ const ResumePreview: React.FC<ResumePreviewProps> = ({ data, onDownload, onReset
                                   <span style={{ fontWeight: 'bold', fontSize: styles.fontSizeBody, color: black }}>
                                     {exp.company}{exp.location ? `, ${formatLocation(exp.location)}` : ''}
                                   </span>
-                                  <span style={{ fontWeight: 'bold', textAlign: 'right', fontSize: styles.fontSizeBody, color: black }}>{exp.dates}</span>
+                                  {exp.dates && exp.dates !== "undefined" && (
+                                    <span style={{ fontWeight: 'bold', textAlign: 'right', fontSize: styles.fontSizeBody, color: black }}>{exp.dates}</span>
+                                  )}
                                 </div>
                                 <div style={{ fontWeight: 'bold', marginBottom: 0, fontSize: styles.fontSizeBody, color: black }}>
                                   {exp.title}
@@ -493,9 +498,11 @@ const ResumePreview: React.FC<ResumePreviewProps> = ({ data, onDownload, onReset
                         {styles.jobLayout === 'modern' ? (
                             // Modern Layout
                             <>
-                                <div style={{ fontWeight: 'bold', fontSize: styles.fontSizeBody, color: black, marginBottom: '2px' }}>
-                                    {formatModernDate(exp.dates)}
-                                </div>
+                                {exp.dates && exp.dates !== "undefined" && (
+                                  <div style={{ fontWeight: 'bold', fontSize: styles.fontSizeBody, color: black, marginBottom: '2px' }}>
+                                      {formatModernDate(exp.dates)}
+                                  </div>
+                                )}
                                 <div style={{ fontWeight: 'bold', fontSize: styles.fontSizeBody, color: black, marginBottom: '2px' }}>
                                     {exp.company}{exp.location ? `, ${formatLocation(exp.location)}` : ''}
                                 </div>
@@ -510,7 +517,9 @@ const ResumePreview: React.FC<ResumePreviewProps> = ({ data, onDownload, onReset
                                   <span style={{ fontWeight: 'bold', fontSize: styles.fontSizeBody, color: black }}>
                                     {exp.company}{exp.location ? `, ${formatLocation(exp.location)}` : ''}
                                   </span>
-                                  <span style={{ fontWeight: 'bold', textAlign: 'right', fontSize: styles.fontSizeBody, color: black }}>{exp.dates}</span>
+                                  {exp.dates && exp.dates !== "undefined" && (
+                                    <span style={{ fontWeight: 'bold', textAlign: 'right', fontSize: styles.fontSizeBody, color: black }}>{exp.dates}</span>
+                                  )}
                                 </div>
                                 <div style={{ fontWeight: 'bold', marginBottom: 0, fontSize: styles.fontSizeBody, color: black }}>
                                   {exp.title}
@@ -560,7 +569,9 @@ const ResumePreview: React.FC<ResumePreviewProps> = ({ data, onDownload, onReset
                           <span style={{ fontWeight: 'bold', fontSize: styles.fontSizeBody, color: black }}>
                             {edu.institution}{edu.location ? `, ${formatLocation(edu.location)}` : ''}
                           </span>
-                          <span style={{ fontWeight: 'bold', textAlign: 'right', fontSize: styles.fontSizeBody, color: black }}>{edu.dates}</span>
+                          {edu.dates && edu.dates !== "undefined" && (
+                            <span style={{ fontWeight: 'bold', textAlign: 'right', fontSize: styles.fontSizeBody, color: black }}>{edu.dates}</span>
+                          )}
                         </div>
                         <div style={{ fontWeight: 'bold', fontSize: styles.fontSizeBody, color: black }}>
                           {edu.degree}

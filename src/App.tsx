@@ -24,6 +24,7 @@ interface StagedContent {
   text?: string;
   base64?: string;
   mimeType: string;
+  fileName?: string;
 }
 
 const App: React.FC = () => {
@@ -37,6 +38,7 @@ const App: React.FC = () => {
   const [stats, setStats] = useState(getUsageStats(usePro));
   const [stagedContent, setStagedContent] = useState<StagedContent | null>(null);
   const [showAdmin, setShowAdmin] = useState(false);
+  const [pendingResumeId, setPendingResumeId] = useState<string | null>(null);
 
   useEffect(() => {
     fetch('/api/health')
@@ -44,6 +46,56 @@ const App: React.FC = () => {
       .then(data => console.log('Backend Health:', data))
       .catch(err => console.error('Backend Health Check Failed:', err));
   }, []);
+
+  // Poll for approval status
+  useEffect(() => {
+    let intervalId: NodeJS.Timeout;
+
+    if (appState === AppState.WAITING_APPROVAL && pendingResumeId) {
+      intervalId = setInterval(async () => {
+        try {
+          const res = await fetch(`/api/resumes/${pendingResumeId}/status`);
+          if (res.ok) {
+            const data = await res.json();
+            if (data.status === 'approved') {
+              clearInterval(intervalId);
+              processApprovedResume();
+            } else if (data.status === 'rejected') {
+              clearInterval(intervalId);
+              setErrorMsg("Your resume submission was rejected by the administrator.");
+              setAppState(AppState.ERROR);
+            }
+          }
+        } catch (err) {
+          console.error("Error checking resume status:", err);
+        }
+      }, 3000); // Check every 3 seconds
+    }
+
+    return () => {
+      if (intervalId) clearInterval(intervalId);
+    };
+  }, [appState, pendingResumeId]);
+
+  const processApprovedResume = async () => {
+    if (!stagedContent) return;
+    
+    setAppState(AppState.PROCESSING);
+    try {
+      const formattedData = await extractResumeData({
+        text: stagedContent.text,
+        base64: stagedContent.base64,
+        mimeType: stagedContent.mimeType,
+        format: selectedFormat
+      }, usePro);
+      
+      setResumeData(formattedData);
+      setAppState(AppState.REVIEW);
+    } catch (err: any) {
+      setErrorMsg(err.message);
+      setAppState(AppState.ERROR);
+    }
+  };
 
   // Handle file input (drag & drop or click)
   const handleFileChange = useCallback(async (file: File) => {
@@ -66,7 +118,7 @@ const App: React.FC = () => {
         if (!text || text.trim().length === 0) {
           throw new Error("Could not extract text from this Word document.");
         }
-        setStagedContent({ text, mimeType: 'text/plain' });
+        setStagedContent({ text, mimeType: 'text/plain', fileName: file.name });
         return;
       }
 
@@ -75,12 +127,21 @@ const App: React.FC = () => {
         file.type === 'application/msword' || 
         file.name.endsWith('.doc')
       ) {
-        const formData = new FormData();
-        formData.append('file', file);
+        const base64Data = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.readAsDataURL(file);
+          reader.onload = () => {
+            const result = reader.result as string;
+            const base64 = result.split(',')[1];
+            resolve(base64);
+          };
+          reader.onerror = (error) => reject(error);
+        });
         
         const response = await fetch('/api/extract-doc', {
           method: 'POST',
-          body: formData,
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ fileBase64: base64Data }),
         });
 
         if (!response.ok) {
@@ -95,7 +156,7 @@ const App: React.FC = () => {
         }
 
         const { text } = await response.json();
-        setStagedContent({ text, mimeType: 'text/plain' });
+        setStagedContent({ text, mimeType: 'text/plain', fileName: file.name });
         return;
       }
 
@@ -108,7 +169,7 @@ const App: React.FC = () => {
         file.name.endsWith('.rtf')
       ) {
         const text = await file.text();
-        setStagedContent({ text, mimeType: 'text/plain' });
+        setStagedContent({ text, mimeType: 'text/plain', fileName: file.name });
         return;
       }
 
@@ -126,7 +187,7 @@ const App: React.FC = () => {
           reader.onerror = (error) => reject(error);
         });
 
-        setStagedContent({ base64: base64Data, mimeType: file.type });
+        setStagedContent({ base64: base64Data, mimeType: file.type, fileName: file.name });
         return;
       }
 
@@ -144,7 +205,6 @@ const App: React.FC = () => {
     
     setAppState(AppState.PROCESSING);
     try {
-      // Call the new submit endpoint
       const response = await fetch('/api/submit', {
         method: 'POST',
         headers: {
@@ -152,7 +212,7 @@ const App: React.FC = () => {
         },
         body: JSON.stringify({
           content: stagedContent,
-          userId: null // Replace with actual user ID if auth is added for users
+          userId: null
         }),
       });
 
@@ -167,7 +227,11 @@ const App: React.FC = () => {
         throw new Error(errorMessage);
       }
 
-      // Transition to waiting approval state
+      const data = await response.json();
+      if (data.resume && data.resume.id) {
+        setPendingResumeId(data.resume.id);
+      }
+      
       setAppState(AppState.WAITING_APPROVAL);
     } catch (err: any) {
       setErrorMsg(err.message);
@@ -414,6 +478,8 @@ const App: React.FC = () => {
                 <p className="text-slate-400 mb-8 max-w-sm">
                   Your resume has been submitted and is waiting for an administrator to approve it. 
                   Once approved, the formatting process will begin automatically.
+                  <br /><br />
+                  <span className="text-amber-400/80 text-sm font-medium">Please keep this tab open.</span>
                 </p>
                 <button 
                   onClick={handleReset}

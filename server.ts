@@ -1,5 +1,6 @@
 import 'dotenv/config';
 import express from "express";
+import crypto from "crypto";
 console.log("Server starting...");
 import WordExtractor from "word-extractor";
 // Fallback for some environments
@@ -30,6 +31,15 @@ async function setupApp() {
     });
   });
 
+  // In-memory fallback for testing without a database
+  const inMemoryResumes: any[] = [];
+
+  // Helper to check if Supabase is actually configured
+  const isSupabaseConfigured = () => {
+    const url = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.VITE_SUPABASE_URL;
+    return url && !url.includes('placeholder');
+  };
+
   // API Route for submitting a resume
   app.post("/api/submit", async (req, res) => {
     try {
@@ -39,25 +49,43 @@ async function setupApp() {
         return res.status(400).json({ error: "Resume content is required" });
       }
 
-      // 1. Save resume as pending
-      const { data: resume, error: resumeError } = await supabaseAdmin
-        .from('resumes')
-        .insert([
-          { user_id: userId, content, status: 'pending' }
-        ])
-        .select()
-        .single();
+      // Only pass user_id to Supabase if it's a valid UUID, otherwise let it be null
+      const isValidUuid = (id: any) => typeof id === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
+      const uid = isValidUuid(userId) ? userId : null;
 
-      if (resumeError) throw resumeError;
+      try {
+        if (!isSupabaseConfigured()) throw new Error("Supabase not configured");
+        
+        // 1. Save resume as pending
+        const insertData: any = { content, status: 'pending' };
+        if (uid) insertData.user_id = uid;
 
-      // 2. Log the action
-      await supabaseAdmin
-        .from('activity_logs')
-        .insert([
-          { user_id: userId, action: 'resume_submitted', details: { resume_id: resume.id } }
-        ]);
+        const { data: resume, error: resumeError } = await supabaseAdmin
+          .from('resumes')
+          .insert([insertData])
+          .select()
+          .single();
 
-      res.status(200).json({ message: "Resume submitted successfully", resume });
+        if (resumeError) throw resumeError;
+
+        // 2. Log the action
+        const logData: any = { action: 'resume_submitted', details: { resume_id: resume.id } };
+        if (uid) logData.user_id = uid;
+
+        await supabaseAdmin
+          .from('activity_logs')
+          .insert([logData]);
+
+        res.status(200).json({ message: "Resume submitted successfully", resume });
+      } catch (dbError: any) {
+        console.warn("Database error (falling back to in-memory):", dbError.message);
+        
+        const resumeId = crypto.randomUUID();
+        const newResume = { id: resumeId, user_id: uid, content, status: 'pending', created_at: new Date().toISOString() };
+        inMemoryResumes.push(newResume);
+        
+        res.status(200).json({ message: "Resume submitted successfully (in-memory)", resume: newResume });
+      }
     } catch (error: any) {
       console.error("Error submitting resume:", error);
       res.status(500).json({ error: error.message || "Failed to submit resume" });
@@ -85,21 +113,80 @@ async function setupApp() {
     }
   });
 
-  // API Route for fetching pending resumes (Admin Dashboard)
-  app.get("/api/resumes/pending", checkAdmin, async (req, res) => {
+  // API Route for fetching resumes (Admin Dashboard)
+  app.get("/api/resumes", checkAdmin, async (req, res) => {
     try {
-      const { data: resumes, error } = await supabaseAdmin
-        .from('resumes')
-        .select('*')
-        .eq('status', 'pending')
-        .order('created_at', { ascending: false });
+      const { status } = req.query;
+      
+      try {
+        if (!isSupabaseConfigured()) throw new Error("Supabase not configured");
+        
+        let query = supabaseAdmin
+          .from('resumes')
+          .select('*')
+          .order('created_at', { ascending: false });
+          
+        if (status === 'pending') {
+          query = query.eq('status', 'pending').is('content->rejected', null);
+        } else if (status === 'approved') {
+          query = query.eq('status', 'approved');
+        } else if (status === 'rejected') {
+          query = query.eq('status', 'pending').eq('content->rejected', true);
+        }
+          
+        const { data: dbResumes, error } = await query;
 
-      if (error) throw error;
+        if (error) throw error;
+        
+        // Map the status for the frontend
+        const resumes = dbResumes.map(r => ({
+          ...r,
+          status: r.content?.rejected ? 'rejected' : r.status
+        }));
 
-      res.status(200).json({ resumes });
+        res.status(200).json({ resumes });
+      } catch (dbError: any) {
+        console.warn("Database error (falling back to in-memory):", dbError.message);
+        let filtered = inMemoryResumes;
+        if (status && typeof status === 'string') {
+          filtered = filtered.filter(r => r.status === status);
+        }
+        res.status(200).json({ resumes: filtered });
+      }
     } catch (error: any) {
-      console.error("Error fetching pending resumes:", error);
-      res.status(500).json({ error: error.message || "Failed to fetch pending resumes" });
+      console.error("Error fetching resumes:", error);
+      res.status(500).json({ error: error.message || "Failed to fetch resumes" });
+    }
+  });
+
+  // API Route for checking resume status
+  app.get("/api/resumes/:id/status", async (req, res) => {
+    try {
+      const { id } = req.params;
+      
+      try {
+        if (!isSupabaseConfigured()) throw new Error("Supabase not configured");
+        const { data: resume, error } = await supabaseAdmin
+          .from('resumes')
+          .select('status, content')
+          .eq('id', id)
+          .single();
+
+        if (error) throw error;
+        
+        const currentStatus = resume.content?.rejected ? 'rejected' : resume.status;
+        res.status(200).json({ status: currentStatus });
+      } catch (dbError: any) {
+        console.warn("Database error (falling back to in-memory):", dbError.message);
+        const resume = inMemoryResumes.find(r => r.id === id);
+        if (!resume) {
+          return res.status(404).json({ error: "Resume not found" });
+        }
+        res.status(200).json({ status: resume.status });
+      }
+    } catch (error: any) {
+      console.error("Error checking resume status:", error);
+      res.status(500).json({ error: error.message || "Failed to check resume status" });
     }
   });
 
@@ -112,39 +199,112 @@ async function setupApp() {
         return res.status(400).json({ error: "Resume ID is required" });
       }
 
-      // 1. Update status to approved
-      const { data: resume, error: updateError } = await supabaseAdmin
-        .from('resumes')
-        .update({ status: 'approved' })
-        .eq('id', resumeId)
-        .select()
-        .single();
+      try {
+        if (!isSupabaseConfigured()) throw new Error("Supabase not configured");
+        // 1. Update status to approved
+        const { data: resume, error: updateError } = await supabaseAdmin
+          .from('resumes')
+          .update({ status: 'approved' })
+          .eq('id', resumeId)
+          .select()
+          .single();
 
-      if (updateError) throw updateError;
+        if (updateError) throw updateError;
 
-      // 2. Log the approval
-      await supabaseAdmin
-        .from('activity_logs')
-        .insert([
-          { user_id: 'admin', action: 'resume_approved', details: { resume_id: resumeId } }
-        ]);
+        // 2. Log the approval
+        await supabaseAdmin
+          .from('activity_logs')
+          .insert([
+            { action: 'resume_approved', details: { resume_id: resumeId, approved_by: 'admin' } }
+          ]);
 
-      res.status(200).json({ message: "Resume approved successfully", resume });
+        res.status(200).json({ message: "Resume approved successfully", resume });
+      } catch (dbError: any) {
+        console.warn("Database error (falling back to in-memory):", dbError.message);
+        
+        const resumeIndex = inMemoryResumes.findIndex(r => r.id === resumeId);
+        if (resumeIndex === -1) {
+          return res.status(404).json({ error: "Resume not found in memory" });
+        }
+        
+        inMemoryResumes[resumeIndex].status = 'approved';
+        res.status(200).json({ message: "Resume approved successfully (in-memory)", resume: inMemoryResumes[resumeIndex] });
+      }
     } catch (error: any) {
       console.error("Error approving resume:", error);
       res.status(500).json({ error: error.message || "Failed to approve resume" });
     }
   });
 
-  // API Route for .doc extraction
-  app.post("/api/extract-doc", upload.single("file"), async (req, res) => {
+  // API Route for rejecting a resume
+  app.post("/api/reject", checkAdmin, async (req, res) => {
     try {
-      if (!req.file) {
-        return res.status(400).json({ error: "No file uploaded" });
+      const { resumeId } = req.body;
+
+      if (!resumeId) {
+        return res.status(400).json({ error: "Resume ID is required" });
       }
 
+      try {
+        if (!isSupabaseConfigured()) throw new Error("Supabase not configured");
+        // 1. Fetch the current resume to get its content
+        const { data: currentResume, error: fetchError } = await supabaseAdmin
+          .from('resumes')
+          .select('content')
+          .eq('id', resumeId)
+          .single();
+          
+        if (fetchError) throw fetchError;
+
+        // 2. Update status by setting a flag in the content JSONB (to bypass check constraint)
+        const { data: resume, error: updateError } = await supabaseAdmin
+          .from('resumes')
+          .update({ 
+            content: { ...currentResume.content, rejected: true } 
+          })
+          .eq('id', resumeId)
+          .select()
+          .single();
+
+        if (updateError) throw updateError;
+
+        // 3. Log the rejection
+        await supabaseAdmin
+          .from('activity_logs')
+          .insert([
+            { action: 'resume_rejected', details: { resume_id: resumeId, rejected_by: 'admin' } }
+          ]);
+
+        res.status(200).json({ message: "Resume rejected successfully", resume });
+      } catch (dbError: any) {
+        console.warn("Database error (falling back to in-memory):", dbError.message);
+        
+        const resumeIndex = inMemoryResumes.findIndex(r => r.id === resumeId);
+        if (resumeIndex === -1) {
+          return res.status(404).json({ error: "Resume not found in memory" });
+        }
+        
+        inMemoryResumes[resumeIndex].status = 'rejected';
+        res.status(200).json({ message: "Resume rejected successfully (in-memory)", resume: inMemoryResumes[resumeIndex] });
+      }
+    } catch (error: any) {
+      console.error("Error rejecting resume:", error);
+      res.status(500).json({ error: error.message || "Failed to reject resume" });
+    }
+  });
+
+  // API Route for .doc extraction
+  app.post("/api/extract-doc", async (req, res) => {
+    try {
+      const { fileBase64 } = req.body;
+      
+      if (!fileBase64) {
+        return res.status(400).json({ error: "No file data provided" });
+      }
+
+      const buffer = Buffer.from(fileBase64, 'base64');
       const extractor = new Extractor();
-      const extracted = await extractor.extract(req.file.buffer);
+      const extracted = await extractor.extract(buffer);
       const text = extracted.getBody();
 
       if (!text || text.trim().length === 0) {

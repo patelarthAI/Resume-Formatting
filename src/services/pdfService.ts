@@ -147,12 +147,14 @@ export const generateResumePDF = (data: ResumeData, format: ResumeFormat | strin
           // Date Range
           // Company, Location
           // Title (Italic)
-          content.push({
-              text: formatModernDate(exp.dates),
-              style: 'bodyText',
-              bold: true,
-              margin: [0, 0, 0, 2]
-          });
+          if (exp.dates && exp.dates !== "undefined") {
+            content.push({
+                text: formatModernDate(exp.dates),
+                style: 'bodyText',
+                bold: true,
+                margin: [0, 0, 0, 2]
+            });
+          }
           content.push({
               text: `${exp.company}${exp.location ? `, ${exp.location}` : ''}`,
               style: 'bodyText',
@@ -167,24 +169,29 @@ export const generateResumePDF = (data: ResumeData, format: ResumeFormat | strin
           });
       } else {
           // Classic Layout: Company | Date -> Title
+          const columns: any[] = [
+            {
+              text: [
+                { text: exp.company, bold: true },
+                exp.location ? `, ${exp.location}` : ''
+              ],
+              style: 'bodyText',
+              width: '*'
+            }
+          ];
+          
+          if (exp.dates && exp.dates !== "undefined") {
+            columns.push({
+              text: exp.dates,
+              style: 'bodyText',
+              bold: true,
+              alignment: 'right',
+              width: 'auto'
+            });
+          }
+
           content.push({
-            columns: [
-              {
-                text: [
-                  { text: exp.company, bold: true },
-                  exp.location ? `, ${exp.location}` : ''
-                ],
-                style: 'bodyText',
-                width: '*'
-              },
-              {
-                text: exp.dates,
-                style: 'bodyText',
-                bold: true,
-                alignment: 'right',
-                width: 'auto'
-              }
-            ],
+            columns: columns,
             margin: [0, 0, 0, 2]
           });
 
@@ -217,12 +224,14 @@ export const generateResumePDF = (data: ResumeData, format: ResumeFormat | strin
 
     data.internships.forEach(exp => {
       if (isModern) {
-          content.push({
-              text: formatModernDate(exp.dates),
-              style: 'bodyText',
-              bold: true,
-              margin: [0, 0, 0, 2]
-          });
+          if (exp.dates && exp.dates !== "undefined") {
+            content.push({
+                text: formatModernDate(exp.dates),
+                style: 'bodyText',
+                bold: true,
+                margin: [0, 0, 0, 2]
+            });
+          }
           content.push({
               text: `${exp.company}${exp.location ? `, ${exp.location}` : ''}`,
               style: 'bodyText',
@@ -236,24 +245,29 @@ export const generateResumePDF = (data: ResumeData, format: ResumeFormat | strin
               margin: [0, 0, 0, 4]
           });
       } else {
+          const columns: any[] = [
+            {
+              text: [
+                { text: exp.company, bold: true },
+                exp.location ? `, ${exp.location}` : ''
+              ],
+              style: 'bodyText',
+              width: '*'
+            }
+          ];
+          
+          if (exp.dates && exp.dates !== "undefined") {
+            columns.push({
+              text: exp.dates,
+              style: 'bodyText',
+              bold: true,
+              alignment: 'right',
+              width: 'auto'
+            });
+          }
+
           content.push({
-            columns: [
-              {
-                text: [
-                  { text: exp.company, bold: true },
-                  exp.location ? `, ${exp.location}` : ''
-                ],
-                style: 'bodyText',
-                width: '*'
-              },
-              {
-                text: exp.dates,
-                style: 'bodyText',
-                bold: true,
-                alignment: 'right',
-                width: 'auto'
-              }
-            ],
+            columns: columns,
             margin: [0, 0, 0, 2]
           });
 
@@ -284,24 +298,29 @@ export const generateResumePDF = (data: ResumeData, format: ResumeFormat | strin
     });
 
     data.education.forEach(edu => {
+      const columns: any[] = [
+        {
+          text: [
+            { text: edu.institution, bold: true },
+            edu.location ? `, ${edu.location}` : ''
+          ],
+          style: 'bodyText',
+          width: '*'
+        }
+      ];
+      
+      if (edu.dates && edu.dates !== "undefined") {
+        columns.push({
+          text: isModern ? formatModernDate(edu.dates) : edu.dates,
+          style: 'bodyText',
+          bold: true,
+          alignment: 'right',
+          width: 'auto'
+        });
+      }
+
       content.push({
-        columns: [
-          {
-            text: [
-              { text: edu.institution, bold: true },
-              edu.location ? `, ${edu.location}` : ''
-            ],
-            style: 'bodyText',
-            width: '*'
-          },
-          {
-            text: isModern ? formatModernDate(edu.dates) : edu.dates,
-            style: 'bodyText',
-            bold: true,
-            alignment: 'right',
-            width: 'auto'
-          }
-        ],
+        columns: columns,
         margin: [0, 0, 0, 2]
       });
 
@@ -337,20 +356,38 @@ export const generateResumePDF = (data: ResumeData, format: ResumeFormat | strin
       const useColumns = isGridCandidate && !hasLongItems && section.items && section.items.length > 2;
 
       if (useColumns && section.items) {
-        const leftCol: any[] = [];
-        const rightCol: any[] = [];
+        const maxLen = Math.max(...section.items.map(i => i.length));
+        const numCols = maxLen < 35 ? 3 : 2;
+        const cols: any[][] = Array.from({ length: numCols }, () => []);
         
-        const half = Math.ceil(section.items.length / 2);
+        const processItem = (item: string) => {
+          const isKeyValue = item.includes(":");
+          if (isKeyValue) {
+            const parts = item.split(":");
+            const key = parts[0];
+            const value = parts.slice(1).join(":");
+            return {
+              text: [
+                { text: key + ":", bold: true },
+                value
+              ],
+              listType: 'none',
+              margin: [0, 2, 0, 2]
+            };
+          }
+          return item;
+        };
+        
+        const rows = Math.ceil(section.items.length / numCols);
         section.items.forEach((item, idx) => {
-          if (idx < half) leftCol.push(item);
-          else rightCol.push(item);
+          const colIdx = Math.floor(idx / rows);
+          if (cols[colIdx]) {
+            cols[colIdx].push(processItem(item));
+          }
         });
 
         content.push({
-          columns: [
-            { ul: leftCol, style: 'bodyText' },
-            { ul: rightCol, style: 'bodyText' }
-          ],
+          columns: cols.map(col => ({ ul: col, style: 'bodyText' })),
           margin: [0, 0, 0, 5]
         });
       } else if (section.items) {
@@ -402,5 +439,6 @@ export const generateResumePDF = (data: ResumeData, format: ResumeFormat | strin
   };
 
   const pm = (pdfMake as any).default || pdfMake;
-  pm.createPdf(docDefinition).download(`Formatted_${data.fullName.replace(/\s+/g, '_')}_${isModern ? 'Modern' : 'Classic'}.pdf`);
+  const fileName = `${data.fullName.trim().replace(/\s+/g, '.')}.Formatted.pdf`;
+  pm.createPdf(docDefinition).download(fileName);
 };

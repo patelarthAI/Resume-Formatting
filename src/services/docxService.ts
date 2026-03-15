@@ -180,32 +180,44 @@ export const generateResumeDoc = async (data: ResumeData, format: ResumeFormat =
     });
   };
 
-  const createTwoColumnList = (items: string[]) => {
+  const createColumnList = (items: string[]) => {
+    const maxLen = Math.max(...items.map(i => i.length));
+    const numCols = maxLen < 35 ? 3 : 2;
     const elements = [];
-    const half = Math.ceil(items.length / 2);
-    
-    for (let i = 0; i < half; i++) {
-      const item1 = items[i];
-      const item2 = items[i + half];
-      
-      const children = [
-        new TextRun({ text: "•\t", font: FONT_FAMILY, size: SIZE_TEXT, color: COLOR_BLACK }),
-        new TextRun({ text: item1, font: FONT_FAMILY, size: SIZE_TEXT, color: COLOR_BLACK }),
-      ];
-      
-      if (item2) {
-        children.push(new TextRun({ text: "\t•\t", font: FONT_FAMILY, size: SIZE_TEXT, color: COLOR_BLACK }));
-        children.push(new TextRun({ text: item2, font: FONT_FAMILY, size: SIZE_TEXT, color: COLOR_BLACK }));
+    const rows = Math.ceil(items.length / numCols);
+
+    for (let i = 0; i < rows; i++) {
+      const children = [];
+      const tabStops = [];
+
+      for (let c = 0; c < numCols; c++) {
+        const itemIndex = i + c * rows;
+        const item = items[itemIndex];
+        if (!item) continue;
+
+        const colOffset = c * (7.5 / numCols); // 7.5 inches is writable width
+        const isKeyValue = item.includes(":");
+
+        if (c > 0) {
+          children.push(new TextRun({ text: "\t", font: FONT_FAMILY, size: SIZE_TEXT }));
+          tabStops.push({ type: TabStopType.LEFT, position: convertInchesToTwip(colOffset) });
+        }
+
+        if (isKeyValue) {
+          const parts = item.split(":");
+          const key = parts[0];
+          const value = parts.slice(1).join(":");
+          children.push(new TextRun({ text: key + ":", font: FONT_FAMILY, size: SIZE_TEXT, color: COLOR_BLACK, bold: true }));
+          children.push(new TextRun({ text: value, font: FONT_FAMILY, size: SIZE_TEXT, color: COLOR_BLACK }));
+        } else {
+          children.push(new TextRun({ text: "• ", font: FONT_FAMILY, size: SIZE_TEXT, color: COLOR_BLACK }));
+          children.push(new TextRun({ text: item, font: FONT_FAMILY, size: SIZE_TEXT, color: COLOR_BLACK }));
+        }
       }
-      
+
       elements.push(new Paragraph({
         spacing: SINGLE_LINE,
-        indent: { left: convertInchesToTwip(0.25), hanging: convertInchesToTwip(0.25) },
-        tabStops: [
-          { type: TabStopType.LEFT, position: convertInchesToTwip(0.25) }, // For first bullet text
-          { type: TabStopType.LEFT, position: convertInchesToTwip(3.5) },  // For second bullet
-          { type: TabStopType.LEFT, position: convertInchesToTwip(3.75) }  // For second bullet text
-        ],
+        tabStops: tabStops,
         children: children
       }));
     }
@@ -290,10 +302,12 @@ export const generateResumeDoc = async (data: ResumeData, format: ResumeFormat =
               if (isModern) {
                   // Modern Layout: Date -> Company -> Title
                   // Date
-                  elements.push(new Paragraph({
-                      spacing: SINGLE_LINE,
-                      children: [new TextRun({ text: formatModernDate(exp.dates), font: FONT_FAMILY, size: SIZE_TEXT, bold: true, color: COLOR_BLACK })]
-                  }));
+                  if (exp.dates && exp.dates !== "undefined") {
+                    elements.push(new Paragraph({
+                        spacing: SINGLE_LINE,
+                        children: [new TextRun({ text: formatModernDate(exp.dates), font: FONT_FAMILY, size: SIZE_TEXT, bold: true, color: COLOR_BLACK })]
+                    }));
+                  }
                   // Company, Location
                   elements.push(new Paragraph({
                       spacing: SINGLE_LINE,
@@ -339,10 +353,12 @@ export const generateResumeDoc = async (data: ResumeData, format: ResumeFormat =
               
               if (isModern) {
                   // Modern Layout
-                  elements.push(new Paragraph({
-                      spacing: SINGLE_LINE,
-                      children: [new TextRun({ text: formatModernDate(exp.dates), font: FONT_FAMILY, size: SIZE_TEXT, bold: true, color: COLOR_BLACK })]
-                  }));
+                  if (exp.dates && exp.dates !== "undefined") {
+                    elements.push(new Paragraph({
+                        spacing: SINGLE_LINE,
+                        children: [new TextRun({ text: formatModernDate(exp.dates), font: FONT_FAMILY, size: SIZE_TEXT, bold: true, color: COLOR_BLACK })]
+                    }));
+                  }
                   elements.push(new Paragraph({
                       spacing: SINGLE_LINE,
                       children: [new TextRun({ text: `${exp.company}${exp.location ? `, ${exp.location}` : ''}`, font: FONT_FAMILY, size: SIZE_TEXT, bold: true, color: COLOR_BLACK })]
@@ -386,10 +402,12 @@ export const generateResumeDoc = async (data: ResumeData, format: ResumeFormat =
                
                if (isModern) {
                    // Modern Layout: Date -> Institution -> Degree
-                   elements.push(new Paragraph({
-                       spacing: SINGLE_LINE,
-                       children: [new TextRun({ text: formatModernDate(edu.dates), font: FONT_FAMILY, size: SIZE_TEXT, bold: true, color: COLOR_BLACK })]
-                   }));
+                   if (edu.dates && edu.dates !== "undefined") {
+                     elements.push(new Paragraph({
+                         spacing: SINGLE_LINE,
+                         children: [new TextRun({ text: formatModernDate(edu.dates), font: FONT_FAMILY, size: SIZE_TEXT, bold: true, color: COLOR_BLACK })]
+                     }));
+                   }
                    elements.push(new Paragraph({
                        spacing: SINGLE_LINE,
                        children: [new TextRun({ text: `${edu.institution}${edu.location ? `, ${edu.location}` : ''}`, font: FONT_FAMILY, size: SIZE_TEXT, bold: true, color: COLOR_BLACK })]
@@ -436,16 +454,27 @@ export const generateResumeDoc = async (data: ResumeData, format: ResumeFormat =
              elements.push(createSectionHeader(section.title));
              
              if (useColumns && section.items) {
-               elements.push(...createTwoColumnList(section.items));
+               elements.push(...createColumnList(section.items));
              } else if (section.items) {
                section.items.forEach(item => {
-                 const isKeyValue = item.includes(":") && item.indexOf(":") < 20; 
+                 const isKeyValue = item.includes(":"); 
                  if (isKeyValue) {
+                    const parts = item.split(":");
+                    const key = parts[0];
+                    const value = parts.slice(1).join(":");
+                    
                     elements.push(new Paragraph({
                         spacing: SINGLE_LINE,
                         children: [
                           new TextRun({
-                            text: item,
+                            text: key + ":",
+                            font: FONT_FAMILY,
+                            size: SIZE_TEXT,
+                            color: COLOR_BLACK,
+                            bold: true
+                          }),
+                          new TextRun({
+                            text: value,
                             font: FONT_FAMILY,
                             size: SIZE_TEXT,
                             color: COLOR_BLACK,

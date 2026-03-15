@@ -38,7 +38,17 @@ const App: React.FC = () => {
   const [stats, setStats] = useState(getUsageStats(usePro));
   const [stagedContent, setStagedContent] = useState<StagedContent | null>(null);
   const [showAdmin, setShowAdmin] = useState(false);
-  const [pendingResumeId, setPendingResumeId] = useState<string | null>(null);
+  const [pendingResumeId, setPendingResumeId] = useState<string | null>(() => {
+    return localStorage.getItem('pendingResumeId');
+  });
+
+  useEffect(() => {
+    if (pendingResumeId) {
+      localStorage.setItem('pendingResumeId', pendingResumeId);
+    } else {
+      localStorage.removeItem('pendingResumeId');
+    }
+  }, [pendingResumeId]);
 
   useEffect(() => {
     fetch('/api/health')
@@ -59,11 +69,16 @@ const App: React.FC = () => {
             const data = await res.json();
             if (data.status === 'approved') {
               clearInterval(intervalId);
-              processApprovedResume();
+              // Restore content from backend if we lost it due to refresh
+              if (!stagedContent && data.content) {
+                setStagedContent(data.content);
+              }
+              processApprovedResume(data.content || stagedContent);
             } else if (data.status === 'rejected') {
               clearInterval(intervalId);
               setErrorMsg("Your resume submission was rejected by the administrator.");
               setAppState(AppState.ERROR);
+              setPendingResumeId(null);
             }
           }
         } catch (err) {
@@ -77,23 +92,25 @@ const App: React.FC = () => {
     };
   }, [appState, pendingResumeId]);
 
-  const processApprovedResume = async () => {
-    if (!stagedContent) return;
+  const processApprovedResume = async (contentToProcess: any = stagedContent) => {
+    if (!contentToProcess) return;
     
     setAppState(AppState.PROCESSING);
     try {
       const formattedData = await extractResumeData({
-        text: stagedContent.text,
-        base64: stagedContent.base64,
-        mimeType: stagedContent.mimeType,
+        text: contentToProcess.text,
+        base64: contentToProcess.base64,
+        mimeType: contentToProcess.mimeType,
         format: selectedFormat
       }, usePro);
       
       setResumeData(formattedData);
       setAppState(AppState.REVIEW);
+      setPendingResumeId(null); // Clear the pending ID once we start reviewing
     } catch (err: any) {
       setErrorMsg(err.message);
       setAppState(AppState.ERROR);
+      setPendingResumeId(null);
     }
   };
 
@@ -266,7 +283,16 @@ const App: React.FC = () => {
     setResumeData(null);
     setFileName('');
     setErrorMsg('');
+    setPendingResumeId(null);
+    setStagedContent(null);
   };
+
+  // Restore state on mount if there's a pending resume
+  useEffect(() => {
+    if (pendingResumeId && appState === AppState.IDLE) {
+      setAppState(AppState.WAITING_APPROVAL);
+    }
+  }, []);
 
   return (
     <div className="min-h-screen bg-[#0f172a] text-slate-200 font-sans selection:bg-indigo-500/30">

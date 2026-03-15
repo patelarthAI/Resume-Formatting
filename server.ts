@@ -127,11 +127,11 @@ async function setupApp() {
           .order('created_at', { ascending: false });
           
         if (status === 'pending') {
-          query = query.eq('status', 'pending').is('content->rejected', null);
+          query = query.eq('status', 'pending').is('content->>rejected', null);
         } else if (status === 'approved') {
           query = query.eq('status', 'approved');
         } else if (status === 'rejected') {
-          query = query.eq('status', 'pending').eq('content->rejected', true);
+          query = query.eq('status', 'pending').eq('content->>rejected', 'true');
         }
           
         const { data: dbResumes, error } = await query;
@@ -175,14 +175,20 @@ async function setupApp() {
         if (error) throw error;
         
         const currentStatus = resume.content?.rejected ? 'rejected' : resume.status;
-        res.status(200).json({ status: currentStatus });
+        res.status(200).json({ 
+          status: currentStatus,
+          content: resume.content // Send content back so frontend can recover after refresh
+        });
       } catch (dbError: any) {
         console.warn("Database error (falling back to in-memory):", dbError.message);
         const resume = inMemoryResumes.find(r => r.id === id);
         if (!resume) {
           return res.status(404).json({ error: "Resume not found" });
         }
-        res.status(200).json({ status: resume.status });
+        res.status(200).json({ 
+          status: resume.status,
+          content: resume.content 
+        });
       }
     } catch (error: any) {
       console.error("Error checking resume status:", error);

@@ -118,47 +118,72 @@ async function setupApp() {
 
   // API Route for fetching resumes (Admin Dashboard)
   app.get("/api/resumes", checkAdmin, async (req, res) => {
+    console.log(`Admin fetching resumes with status filter: ${req.query.status}`);
     try {
       const { status } = req.query;
       
       try {
-        if (!isSupabaseConfigured()) throw new Error("Supabase not configured");
+        if (!isSupabaseConfigured()) {
+          console.log("Supabase not configured, using in-memory fallback");
+          throw new Error("Supabase not configured");
+        }
         
+        // Use a simpler select and filter in JS if needed, or use correct JSONB syntax
+        // In Supabase JS, you can use 'column->field' in select
         let query = supabaseAdmin
           .from('resumes')
-          .select('id, status, created_at, content->fileName, content->rejected')
+          .select('id, status, created_at, content')
           .order('created_at', { ascending: false })
           .limit(50);
           
-        if (status === 'pending') {
-          query = query.eq('status', 'pending').is('content->>rejected', null);
-        } else if (status === 'approved') {
-          query = query.eq('status', 'approved');
-        } else if (status === 'rejected') {
-          query = query.eq('status', 'pending').eq('content->>rejected', 'true');
-        }
-          
         const { data: dbResumes, error } = await query;
 
-        if (error) throw error;
+        if (error) {
+          console.error("Supabase query error:", error);
+          throw error;
+        }
         
-        // Map the status for the frontend
-        const resumes = dbResumes.map(r => ({
-          ...r,
-          status: r.rejected ? 'rejected' : r.status
-        }));
+        if (!dbResumes) {
+          console.log("No resumes found in database");
+          return res.status(200).json({ resumes: [] });
+        }
+
+        // Filter and map in JS for better reliability with JSONB
+        let resumes = dbResumes.map((r: any) => {
+          const content = r.content || {};
+          const isRejected = content.rejected === true || content.rejected === 'true';
+          return {
+            id: r.id,
+            status: isRejected ? 'rejected' : r.status,
+            created_at: r.created_at,
+            fileName: content.fileName || 'Unknown',
+            rejected: isRejected
+          };
+        });
+
+        if (status === 'pending') {
+          resumes = resumes.filter(r => r.status === 'pending' && !r.rejected);
+        } else if (status === 'approved') {
+          resumes = resumes.filter(r => r.status === 'approved');
+        } else if (status === 'rejected') {
+          resumes = resumes.filter(r => r.rejected);
+        }
 
         res.status(200).json({ resumes });
       } catch (dbError: any) {
         console.warn("Database error (falling back to in-memory):", dbError.message);
-        let filtered = inMemoryResumes;
-        if (status && typeof status === 'string') {
-          filtered = filtered.filter(r => r.status === status);
+        let filtered = [...inMemoryResumes];
+        if (status === 'pending') {
+          filtered = filtered.filter(r => r.status === 'pending');
+        } else if (status === 'approved') {
+          filtered = filtered.filter(r => r.status === 'approved');
+        } else if (status === 'rejected') {
+          filtered = filtered.filter(r => r.status === 'rejected');
         }
         res.status(200).json({ resumes: filtered });
       }
     } catch (error: any) {
-      console.error("Error fetching resumes:", error);
+      console.error("Critical error fetching resumes:", error);
       res.status(500).json({ error: error.message || "Failed to fetch resumes" });
     }
   });

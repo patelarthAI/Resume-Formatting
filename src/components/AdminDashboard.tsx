@@ -21,10 +21,22 @@ const AdminDashboard: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('pending');
+  const [healthStatus, setHealthStatus] = useState<any>(null);
+
+  const checkHealth = async () => {
+    try {
+      const response = await fetch('/api/health');
+      const data = await response.json();
+      setHealthStatus(data);
+    } catch (err: any) {
+      setHealthStatus({ error: err.message });
+    }
+  };
 
   useEffect(() => {
     if (adminPassword) {
       fetchResumes();
+      checkHealth();
     } else {
       setLoading(false);
     }
@@ -173,6 +185,30 @@ const AdminDashboard: React.FC = () => {
           <h1 className="text-2xl font-bold text-white">Admin Dashboard</h1>
           <p className="text-slate-400 text-sm mt-1">Manage resume submissions</p>
         </div>
+
+        {/* Health Status (Debug) */}
+        {healthStatus && (
+          <div className="mb-6 p-4 bg-white/5 rounded-lg border border-white/10 text-xs font-mono">
+            <h3 className="font-bold mb-2 text-slate-300 flex items-center gap-2">
+              <AlertTriangle className="w-3 h-3 text-amber-500" />
+              System Health (Debug)
+            </h3>
+            <pre className="overflow-auto max-h-32 text-slate-400">
+              {JSON.stringify(healthStatus, null, 2)}
+            </pre>
+            {healthStatus.storage === 'memory' && (
+              <div className="mt-2 p-2 bg-amber-500/10 border border-amber-500/20 rounded text-amber-200 text-[10px]">
+                <strong>Warning:</strong> Using in-memory storage. Data will be lost when the server restarts (common on Vercel). Please configure Supabase for persistence.
+              </div>
+            )}
+            <button 
+              onClick={checkHealth}
+              className="mt-2 text-indigo-400 hover:text-indigo-300 underline"
+            >
+              Refresh Health
+            </button>
+          </div>
+        )}
         <div className="flex items-center gap-4">
           <button 
             onClick={fetchResumes}

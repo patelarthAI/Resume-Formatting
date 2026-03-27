@@ -62,11 +62,13 @@ const App: React.FC = () => {
     let intervalId: NodeJS.Timeout;
 
     if (appState === AppState.WAITING_APPROVAL && pendingResumeId) {
+      console.log("Polling for approval status for resume:", pendingResumeId);
       intervalId = setInterval(async () => {
         try {
           const res = await fetch(`/api/resumes/${pendingResumeId}/status`);
           if (res.ok) {
             const data = await res.json();
+            console.log("Approval status response:", data);
             if (data.status === 'approved') {
               clearInterval(intervalId);
               // Restore content from backend if we lost it due to refresh
@@ -93,8 +95,12 @@ const App: React.FC = () => {
   }, [appState, pendingResumeId]);
 
   const processApprovedResume = async (contentToProcess: any = stagedContent) => {
-    if (!contentToProcess) return;
+    if (!contentToProcess) {
+      console.warn("No content to process in processApprovedResume");
+      return;
+    }
     
+    console.log("Processing approved resume content:", contentToProcess);
     setAppState(AppState.PROCESSING);
     try {
       const formattedData = await extractResumeData({
@@ -104,10 +110,12 @@ const App: React.FC = () => {
         format: selectedFormat
       }, usePro);
       
+      console.log("Extracted resume data successfully:", formattedData);
       setResumeData(formattedData);
       setAppState(AppState.REVIEW);
       setPendingResumeId(null); // Clear the pending ID once we start reviewing
     } catch (err: any) {
+      console.error("Error during resume data extraction:", err);
       setErrorMsg(err.message);
       setAppState(AppState.ERROR);
       setPendingResumeId(null);

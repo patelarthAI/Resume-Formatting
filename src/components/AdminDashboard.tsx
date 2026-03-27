@@ -168,6 +168,14 @@ const AdminDashboard: React.FC = () => {
         </div>
         <div className="flex items-center gap-4">
           <button 
+            onClick={fetchResumes}
+            disabled={loading}
+            className="p-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-slate-300 transition-colors disabled:opacity-50"
+            title="Refresh"
+          >
+            <Clock className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+          </button>
+          <button 
             onClick={handleLogout}
             className="p-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-slate-300 transition-colors"
             title="Sign Out"
@@ -229,7 +237,7 @@ const AdminDashboard: React.FC = () => {
                 </div>
                 <div>
                   <h4 className="text-white font-medium break-all">
-                    {resume.content?.fileName || 'Unnamed Resume'}
+                    {(resume as any).fileName || resume.content?.fileName || 'Unnamed Resume'}
                   </h4>
                   <div className="flex items-center gap-3 text-sm text-slate-400 mt-1">
                     <span>ID: {resume.id.substring(0, 8)}...</span>

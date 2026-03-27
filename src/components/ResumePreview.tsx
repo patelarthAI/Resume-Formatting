@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { ResumeData, GrammarIssue, ChangeLogItem, ResumeFormat } from "@/types";
-import { Download, CheckCircle2, FileText, SpellCheck, Loader2, History, ArrowRight, LayoutTemplate, Undo2, ShieldCheck, Lock, AlertCircle } from "lucide-react";
+import { Download, CheckCircle2, FileText, SpellCheck, Loader2, History, ArrowRight, LayoutTemplate, Undo2, ShieldCheck, Lock, AlertCircle, Sparkles, Check, X } from "lucide-react";
 import { analyzeGrammar } from "@/services/geminiService";
 import { generateResumePDF } from "@/services/pdfService";
 import { generateResumeDoc } from "@/services/docxService";
@@ -20,8 +20,10 @@ interface ResumePreviewProps {
 }
 
 const ResumePreview: React.FC<ResumePreviewProps> = ({ data, onDownload, onReset, onUpdate, selectedFormat, usePro = false }) => {
+  console.log("ResumePreview mounting with data:", data);
   const [isChecking, setIsChecking] = useState(false);
   const [issues, setIssues] = useState<GrammarIssue[]>([]);
+  const [tone, setTone] = useState<'PROFESSIONAL' | 'CONFIDENT' | 'DIRECT'>('PROFESSIONAL');
 
   const [changeLog, setChangeLog] = useState<ChangeLogItem[]>(() => {
     if (data.extractionChanges) {
@@ -176,7 +178,8 @@ const ResumePreview: React.FC<ResumePreviewProps> = ({ data, onDownload, onReset
   const handleCheckGrammar = async () => {
     setIsChecking(true);
     try {
-      const foundIssues = await analyzeGrammar(data, selectedFormat, usePro);
+      // Pass tone to analyzeGrammar (I'll update the service too)
+      const foundIssues = await analyzeGrammar(data, selectedFormat, usePro, tone);
       setIssues(foundIssues);
       if (foundIssues.length === 0) {
         alert("No grammar issues found!");
@@ -197,29 +200,92 @@ const ResumePreview: React.FC<ResumePreviewProps> = ({ data, onDownload, onReset
     const currentValue = get(newData, issue.path);
     
     if (typeof currentValue === 'string' && issue.errorText && issue.suggestions && issue.suggestions.length > 0) {
-        // Replace ONLY the error text with the first suggestion (or selected one passed in issue)
         const selectedSuggestion = issue.suggestions[0];
-        const newValue = currentValue.replace(issue.errorText, selectedSuggestion);
-        set(newData, issue.path, newValue);
         
-        // Add to Change Log
-        const newLogItem: ChangeLogItem = {
-            id: Date.now().toString(),
-            timestamp: Date.now(),
-            path: issue.path,
-            original: issue.errorText,
-            new: selectedSuggestion,
-            reason: issue.reason
-        };
-        setChangeLog(prev => [newLogItem, ...prev]);
+        // Robust replacement
+        let newValue = currentValue;
+        if (currentValue.includes(issue.errorText)) {
+            newValue = currentValue.replace(issue.errorText, selectedSuggestion);
+        } else if (issue.original === currentValue) {
+            // If the AI's 'original' matches our current value exactly, trust the suggestion
+            newValue = selectedSuggestion;
+        } else {
+            // Try a more flexible match (ignoring extra whitespace)
+            const cleanError = issue.errorText.trim();
+            if (currentValue.includes(cleanError)) {
+                newValue = currentValue.replace(cleanError, selectedSuggestion);
+            }
+        }
 
-    } else {
-        // Fallback if something is wrong, though this shouldn't happen with new logic
-        console.warn("Could not replace text safely", issue);
+        if (newValue !== currentValue) {
+            set(newData, issue.path, newValue);
+            
+            // Add to Change Log
+            const newLogItem: ChangeLogItem = {
+                id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
+                timestamp: Date.now(),
+                path: issue.path,
+                original: issue.errorText,
+                new: selectedSuggestion,
+                reason: issue.reason
+            };
+            setChangeLog(prev => [newLogItem, ...prev]);
+            onUpdate(newData);
+        }
     }
     
-    onUpdate(newData);
     setIssues(prev => prev.filter(i => i.id !== issue.id));
+  };
+
+  const handleFixAll = () => {
+    if (issues.length === 0) return;
+    
+    // Create deep clone to avoid mutation
+    let newData = JSON.parse(JSON.stringify(data));
+    const newLogs: ChangeLogItem[] = [];
+    
+    // Group issues by path to apply them sequentially to the same string
+    const issuesByPath: Record<string, GrammarIssue[]> = {};
+    issues.forEach(issue => {
+        if (!issuesByPath[issue.path]) issuesByPath[issue.path] = [];
+        issuesByPath[issue.path].push(issue);
+    });
+
+    Object.entries(issuesByPath).forEach(([path, pathIssues]) => {
+        let currentValue = get(newData, path);
+        if (typeof currentValue !== 'string') return;
+
+        // Sort issues by their position in the string (reverse order to not break indices)
+        const sortedIssues = [...pathIssues].sort((a, b) => {
+            return currentValue.lastIndexOf(b.errorText) - currentValue.lastIndexOf(a.errorText);
+        });
+
+        sortedIssues.forEach(issue => {
+            const selectedSuggestion = issue.suggestions[0];
+            if (currentValue.includes(issue.errorText)) {
+                const nextValue = currentValue.replace(issue.errorText, selectedSuggestion);
+                if (nextValue !== currentValue) {
+                    currentValue = nextValue;
+                    newLogs.push({
+                        id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
+                        timestamp: Date.now(),
+                        path: issue.path,
+                        original: issue.errorText,
+                        new: selectedSuggestion,
+                        reason: issue.reason
+                    });
+                }
+            }
+        });
+        
+        set(newData, path, currentValue);
+    });
+
+    if (newLogs.length > 0) {
+        setChangeLog(prev => [...newLogs, ...prev]);
+        onUpdate(newData);
+    }
+    setIssues([]);
   };
 
   const handleIgnoreIssue = (issue: GrammarIssue) => {
@@ -265,6 +331,21 @@ const ResumePreview: React.FC<ResumePreviewProps> = ({ data, onDownload, onReset
     }
   };
 
+  const calculateScore = () => {
+    let score = 75; // Base score
+    if (data.summary && data.summary.length > 0) score += 5;
+    if (data.experience && data.experience.length > 2) score += 10;
+    if (data.education && data.education.length > 0) score += 5;
+    if (data.customSections && data.customSections.length > 0) score += 5;
+    
+    // Deduct for issues
+    score -= issues.length * 2;
+    
+    return Math.min(100, Math.max(0, score));
+  };
+
+  const score = calculateScore();
+
   return (
     <div className="flex flex-col lg:flex-row gap-8 w-full max-w-7xl mx-auto">
       {/* Left Column: Resume Preview */}
@@ -280,6 +361,18 @@ const ResumePreview: React.FC<ResumePreviewProps> = ({ data, onDownload, onReset
                 </div>
 
                 <div className="flex gap-3">
+                    {/* Removed ATS Score */}
+                    
+                    <select 
+                        value={tone}
+                        onChange={(e) => setTone(e.target.value as any)}
+                        className="bg-white/5 border border-white/10 rounded-lg px-3 py-1.5 text-xs font-medium text-slate-300 focus:outline-none focus:ring-2 focus:ring-indigo-500/50"
+                    >
+                        <option value="PROFESSIONAL">Professional</option>
+                        <option value="CONFIDENT">Confident</option>
+                        <option value="DIRECT">Direct</option>
+                    </select>
+
                     <button
                         onClick={onReset}
                         className="px-4 py-2 text-sm font-medium text-slate-300 hover:text-white hover:bg-white/5 rounded-lg transition-colors"
@@ -291,7 +384,7 @@ const ResumePreview: React.FC<ResumePreviewProps> = ({ data, onDownload, onReset
                         disabled={isChecking}
                         className="px-4 py-2 text-sm font-medium bg-indigo-500/20 text-indigo-300 hover:bg-indigo-500/30 border border-indigo-500/30 rounded-lg flex items-center gap-2 transition-all disabled:opacity-50"
                     >
-                        {isChecking ? <Loader2 className="w-4 h-4 animate-spin" /> : <SpellCheck className="w-4 h-4" />}
+                        {isChecking ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
                         Check Grammar
                     </button>
                     <button
@@ -669,77 +762,61 @@ const ResumePreview: React.FC<ResumePreviewProps> = ({ data, onDownload, onReset
 
       {/* Right Column: Change Log / Recruiter Dashboard */}
       <div className="w-full lg:w-80 flex-shrink-0 space-y-6">
-        {/* Change Log Panel */}
-        <div className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-3xl p-6 shadow-xl sticky top-8">
-            <div className="flex items-center gap-2 mb-6 pb-4 border-b border-white/10">
-                <History className="w-5 h-5 text-indigo-400" />
-                <h3 className="text-lg font-bold text-white">Modification Log</h3>
-            </div>
+        {/* Grammar Issues Panel */}
+        {issues.length > 0 && (
+            <motion.div 
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-3xl p-6 shadow-xl"
+            >
+                <div className="flex items-center justify-between mb-6 pb-4 border-b border-white/10">
+                    <div className="flex items-center gap-2">
+                        <AlertCircle className="w-5 h-5 text-red-400" />
+                        <h3 className="text-lg font-bold text-white">Issues ({issues.length})</h3>
+                    </div>
+                    <button 
+                        onClick={handleFixAll}
+                        className="text-xs font-bold text-indigo-400 hover:text-indigo-300 transition-colors bg-indigo-500/10 px-3 py-1.5 rounded-full border border-indigo-500/20"
+                    >
+                        Fix All
+                    </button>
+                </div>
 
-            {changeLog.length === 0 ? (
-                <div className="text-center py-8 text-slate-500">
-                    <p className="text-sm">No modifications yet.</p>
-                    <p className="text-xs mt-2">Run grammar check and accept suggestions to see changes here.</p>
-                </div>
-            ) : (
-                <div className="space-y-4 max-h-[600px] overflow-y-auto pr-2 custom-scrollbar">
-                    <AnimatePresence>
-                        {changeLog.map((log) => (
-                            <motion.div
-                                key={log.id}
-                                initial={{ opacity: 0, x: 20 }}
-                                animate={{ opacity: 1, x: 0 }}
-                                exit={{ opacity: 0, x: -20 }}
-                                className="bg-white/5 border border-white/5 rounded-xl p-3 text-sm hover:bg-white/10 transition-colors"
-                            >
-                                <div className="flex justify-between items-start mb-2">
-                                    <span className="text-xs font-mono text-indigo-300">
-                                        {new Date(log.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                                    </span>
-                                    <div className="flex items-center gap-2">
-                                        {log.path !== "Extraction" && (
-                                            <button 
-                                                onClick={() => handleUndoChange(log)}
-                                                className="text-slate-400 hover:text-white transition-colors"
-                                                title="Undo this change"
-                                            >
-                                                <Undo2 className="w-3 h-3" />
-                                            </button>
-                                        )}
-                                        <span className={`text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded ${
-                                            log.path === "Extraction" 
-                                                ? log.original === "REMOVAL" ? "bg-red-500/20 text-red-300" 
-                                                : log.original === "ADDITION" ? "bg-green-500/20 text-green-300"
-                                                : "bg-blue-500/20 text-blue-300"
-                                                : "bg-slate-800/50 text-slate-500"
-                                        }`}>
-                                            {log.path === "Extraction" ? log.original : "Grammar"}
-                                        </span>
-                                    </div>
+                <div className="space-y-3 max-h-[300px] overflow-y-auto pr-2 custom-scrollbar">
+                    {issues.map((issue) => (
+                        <div key={issue.id} className="p-3 rounded-xl bg-white/5 border border-white/5 hover:bg-white/10 transition-colors group">
+                            <div className="flex items-center justify-between mb-1">
+                                <span className={`text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded ${
+                                    issue.type === 'SPELLING' ? 'bg-red-500/20 text-red-300' : 'bg-indigo-500/20 text-indigo-300'
+                                }`}>
+                                    {issue.type}
+                                </span>
+                                <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                    <button 
+                                        onClick={() => handleIgnoreIssue(issue)}
+                                        className="p-1 hover:bg-white/10 rounded text-slate-400"
+                                    >
+                                        <X className="w-3 h-3" />
+                                    </button>
+                                    <button 
+                                        onClick={() => handleAcceptIssue(issue)}
+                                        className="p-1 hover:bg-emerald-500/20 rounded text-emerald-400"
+                                    >
+                                        <Check className="w-3 h-3" />
+                                    </button>
                                 </div>
-                                <div className="mb-2">
-                                    {log.path === "Extraction" ? (
-                                        <div className="text-xs text-slate-300 font-medium">
-                                            {styleText(log.new)}
-                                        </div>
-                                    ) : (
-                                        <>
-                                            <div className="text-xs text-red-400 line-through opacity-70 mb-1">{styleText(log.original)}</div>
-                                            <div className="text-xs text-green-400 font-medium flex items-center gap-1">
-                                                <ArrowRight className="w-3 h-3" /> {styleText(log.new)}
-                                            </div>
-                                        </>
-                                    )}
-                                </div>
-                                <p className="text-xs text-slate-400 italic border-t border-white/5 pt-2 mt-2">
-                                    "{log.reason}"
-                                </p>
-                            </motion.div>
-                        ))}
-                    </AnimatePresence>
+                            </div>
+                            <p className="text-xs text-slate-300 line-clamp-2 mb-2">"{issue.errorText}"</p>
+                            <div className="flex items-center gap-2 text-[10px] text-emerald-400 font-medium">
+                                <ArrowRight className="w-3 h-3" /> {issue.suggestions[0]}
+                            </div>
+                        </div>
+                    ))}
                 </div>
-            )}
-        </div>
+            </motion.div>
+        )}
+
+        {/* Removed Modification Log Panel */}
       </div>
     </div>
   );

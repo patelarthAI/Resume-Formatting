@@ -8,9 +8,12 @@ const Extractor = (WordExtractor as any).default || WordExtractor;
 import multer from "multer";
 import path from "path";
 
-const upload = multer({ storage: multer.memoryStorage() });
+const upload = multer({ 
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 50 * 1024 * 1024 } // 50MB
+});
 
-import { supabaseAdmin } from "./server/supabase.js";
+import { supabaseAdmin } from "./server/supabase.ts";
 
 const app = express();
 const PORT = 3000;
@@ -123,8 +126,9 @@ async function setupApp() {
         
         let query = supabaseAdmin
           .from('resumes')
-          .select('*')
-          .order('created_at', { ascending: false });
+          .select('id, status, created_at, content->fileName, content->rejected')
+          .order('created_at', { ascending: false })
+          .limit(50);
           
         if (status === 'pending') {
           query = query.eq('status', 'pending').is('content->>rejected', null);
@@ -141,7 +145,7 @@ async function setupApp() {
         // Map the status for the frontend
         const resumes = dbResumes.map(r => ({
           ...r,
-          status: r.content?.rejected ? 'rejected' : r.status
+          status: r.rejected ? 'rejected' : r.status
         }));
 
         res.status(200).json({ resumes });
@@ -207,10 +211,24 @@ async function setupApp() {
 
       try {
         if (!isSupabaseConfigured()) throw new Error("Supabase not configured");
-        // 1. Update status to approved
+        // 1. Update status to approved and clear rejected flag
+        const { data: currentResume, error: fetchError } = await supabaseAdmin
+          .from('resumes')
+          .select('content')
+          .eq('id', resumeId)
+          .single();
+          
+        if (fetchError) throw fetchError;
+
+        const updatedContent = { ...currentResume.content };
+        delete updatedContent.rejected;
+
         const { data: resume, error: updateError } = await supabaseAdmin
           .from('resumes')
-          .update({ status: 'approved' })
+          .update({ 
+            status: 'approved',
+            content: updatedContent
+          })
           .eq('id', resumeId)
           .select()
           .single();

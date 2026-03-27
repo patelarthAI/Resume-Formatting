@@ -18,6 +18,18 @@ import { supabaseAdmin } from "./server/supabase.ts";
 const app = express();
 const PORT = 3000;
 
+// Helper to generate a unique ID safely
+function generateId() {
+  try {
+    if (typeof crypto.randomUUID === 'function') {
+      return crypto.randomUUID();
+    }
+    return crypto.randomBytes(16).toString('hex');
+  } catch (e) {
+    return Math.random().toString(36).substring(2) + Date.now().toString(36);
+  }
+}
+
 async function setupApp() {
   console.log("Starting server setup...");
   
@@ -26,11 +38,22 @@ async function setupApp() {
   console.log("Express JSON middleware loaded with 50mb limit");
 
   // Health check
-  app.get("/api/health", (req, res) => {
+  app.get("/api/health", async (req, res) => {
+    let supabaseStatus = "not_configured";
+    if (isSupabaseConfigured()) {
+      try {
+        const { error } = await supabaseAdmin.from('resumes').select('id').limit(1);
+        supabaseStatus = error ? `error: ${error.message}` : "connected";
+      } catch (e: any) {
+        supabaseStatus = `critical_error: ${e.message}`;
+      }
+    }
+
     res.json({ 
       status: "ok", 
       env: process.env.NODE_ENV,
-      hasApiKey: !!(process.env.GEMINI_API_KEY || process.env.VITE_GEMINI_API_KEY)
+      hasApiKey: !!(process.env.GEMINI_API_KEY || process.env.VITE_GEMINI_API_KEY),
+      supabase: supabaseStatus
     });
   });
 
@@ -59,6 +82,8 @@ async function setupApp() {
       try {
         if (!isSupabaseConfigured()) throw new Error("Supabase not configured");
         
+        console.log(`Attempting to save resume to Supabase. Content size: ${JSON.stringify(content).length} chars`);
+        
         // 1. Save resume as pending
         const insertData: any = { content, status: 'pending' };
         if (uid) insertData.user_id = uid;
@@ -69,23 +94,34 @@ async function setupApp() {
           .select()
           .single();
 
-        if (resumeError) throw resumeError;
+        if (resumeError) {
+          console.error("Supabase insert error:", resumeError);
+          throw resumeError;
+        }
+
+        console.log(`Resume saved to Supabase with ID: ${resume.id}`);
 
         // 2. Log the action
         const logData: any = { action: 'resume_submitted', details: { resume_id: resume.id } };
         if (uid) logData.user_id = uid;
 
-        await supabaseAdmin
-          .from('activity_logs')
-          .insert([logData]);
+        try {
+          await supabaseAdmin
+            .from('activity_logs')
+            .insert([logData]);
+        } catch (logErr) {
+          console.warn("Failed to log activity, but resume was saved:", logErr);
+        }
 
         res.status(200).json({ message: "Resume submitted successfully", resume });
       } catch (dbError: any) {
         console.warn("Database error (falling back to in-memory):", dbError.message);
         
-        const resumeId = crypto.randomUUID();
+        const resumeId = generateId();
         const newResume = { id: resumeId, user_id: uid, content, status: 'pending', created_at: new Date().toISOString() };
         inMemoryResumes.push(newResume);
+        
+        console.log(`Resume saved in-memory with ID: ${resumeId}. Total in-memory: ${inMemoryResumes.length}`);
         
         res.status(200).json({ message: "Resume submitted successfully (in-memory)", resume: newResume });
       }
@@ -96,12 +132,22 @@ async function setupApp() {
   });
 
   const checkAdmin = (req: express.Request, res: express.Response, next: express.NextFunction) => {
-    const pass = req.headers['x-admin-password'];
-    const adminPassword = (process.env.APP_ADMIN_PASSWORD || 'admin123').trim();
-    if (typeof pass === 'string' && pass.trim() === adminPassword) {
-      next();
-    } else {
-      res.status(401).json({ error: "Unauthorized" });
+    try {
+      const pass = req.headers['x-admin-password'];
+      const adminPassword = (process.env.APP_ADMIN_PASSWORD || 'admin123').trim();
+      
+      console.log(`[AUTH] Admin check for ${req.path}: Received header ${pass ? 'exists' : 'missing'}`);
+      
+      if (typeof pass === 'string' && pass.trim() === adminPassword) {
+        console.log("[AUTH] Admin check: Success");
+        next();
+      } else {
+        console.log(`[AUTH] Admin check: Unauthorized. Expected: ${adminPassword.substring(0, 2)}..., Received: ${typeof pass === 'string' ? pass.substring(0, 2) + '...' : 'none'}`);
+        res.status(401).json({ error: "Unauthorized" });
+      }
+    } catch (e: any) {
+      console.error("[AUTH] Critical error in checkAdmin middleware:", e);
+      res.status(500).json({ error: "Internal server error in auth middleware" });
     }
   };
 
@@ -118,23 +164,21 @@ async function setupApp() {
 
   // API Route for fetching resumes (Admin Dashboard)
   app.get("/api/resumes", checkAdmin, async (req, res) => {
-    console.log(`Admin fetching resumes with status filter: ${req.query.status}`);
+    const status = req.query.status as string;
+    console.log(`Admin fetching resumes with status filter: ${status}`);
     try {
-      const { status } = req.query;
-      
       try {
         if (!isSupabaseConfigured()) {
           console.log("Supabase not configured, using in-memory fallback");
           throw new Error("Supabase not configured");
         }
         
-        // Use a simpler select and filter in JS if needed, or use correct JSONB syntax
-        // In Supabase JS, you can use 'column->field' in select
+        console.log("Querying Supabase for resumes...");
         let query = supabaseAdmin
           .from('resumes')
           .select('id, status, created_at, content')
           .order('created_at', { ascending: false })
-          .limit(50);
+          .limit(100); // Increased limit slightly
           
         const { data: dbResumes, error } = await query;
 
@@ -143,8 +187,9 @@ async function setupApp() {
           throw error;
         }
         
+        console.log(`Supabase returned ${dbResumes?.length || 0} resumes`);
+        
         if (!dbResumes) {
-          console.log("No resumes found in database");
           return res.status(200).json({ resumes: [] });
         }
 
@@ -161,6 +206,8 @@ async function setupApp() {
           };
         });
 
+        console.log("Mapping complete, applying filters...");
+
         if (status === 'pending') {
           resumes = resumes.filter(r => r.status === 'pending' && !r.rejected);
         } else if (status === 'approved') {
@@ -169,6 +216,7 @@ async function setupApp() {
           resumes = resumes.filter(r => r.rejected);
         }
 
+        console.log(`Returning ${resumes.length} resumes after filtering`);
         res.status(200).json({ resumes });
       } catch (dbError: any) {
         console.warn("Database error (falling back to in-memory):", dbError.message);
@@ -365,6 +413,23 @@ async function setupApp() {
       console.error("Error extracting .doc:", error);
       res.status(500).json({ error: error.message || "Failed to extract text from .doc file" });
     }
+  });
+
+  // Global error handler
+  app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+    console.error(`[GLOBAL ERROR] ${req.method} ${req.path}:`, err);
+    
+    // If headers already sent, delegate to default Express error handler
+    if (res.headersSent) {
+      return next(err);
+    }
+
+    res.status(500).json({ 
+      error: "Internal Server Error", 
+      message: err.message,
+      path: req.path,
+      stack: process.env.NODE_ENV === 'development' ? err.stack : undefined
+    });
   });
 
   if (!process.env.VERCEL) {

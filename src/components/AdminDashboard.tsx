@@ -55,8 +55,15 @@ const AdminDashboard: React.FC = () => {
         }
         let errorMessage = 'Failed to fetch resumes';
         try {
-          const errorData = await response.json();
-          errorMessage = errorData.error || errorMessage;
+          const responseText = await response.text();
+          console.log(`Server error response body: ${responseText}`);
+          try {
+            const errorData = JSON.parse(responseText);
+            errorMessage = errorData.error || errorData.message || errorMessage;
+          } catch (e) {
+            // If not JSON, show the first part of the response text
+            errorMessage = `Server error (${response.status}): ${responseText.substring(0, 100)}${responseText.length > 100 ? '...' : ''}`;
+          }
         } catch (e) {
           errorMessage = `Server error (${response.status}). Please try again later.`;
         }

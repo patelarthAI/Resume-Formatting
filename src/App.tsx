@@ -175,7 +175,11 @@ const App: React.FC = () => {
             const errorData = await response.json();
             errorMessage = errorData.error || errorMessage;
           } catch (e) {
-            errorMessage = `Server error (${response.status}). Please try again later.`;
+            if (response.status === 500) {
+              errorMessage = `Server error (500) during .doc extraction. This format can be tricky; please try saving as .docx or .pdf for better results.`;
+            } else {
+              errorMessage = `Server error (${response.status}). Please try again later.`;
+            }
           }
           throw new Error(errorMessage);
         }
@@ -247,7 +251,11 @@ const App: React.FC = () => {
           const errorData = await response.json();
           errorMessage = errorData.error || errorMessage;
         } catch (e) {
-          errorMessage = `Server error (${response.status}). Please try again later.`;
+          if (response.status === 500) {
+            errorMessage = `Server processing error (500). This might be due to a large file or database issue. Please try a smaller file or try again in a few minutes.`;
+          } else {
+            errorMessage = `Server error (${response.status}). Please try again later.`;
+          }
         }
         throw new Error(errorMessage);
       }

@@ -4,14 +4,13 @@ import crypto from "crypto";
 console.log("Server starting...");
 import multer from "multer";
 import path from "path";
-import WordExtractor from "word-extractor";
 
 const upload = multer({ 
   storage: multer.memoryStorage(),
   limits: { fileSize: 50 * 1024 * 1024 } // 50MB
 });
 
-import { supabaseAdmin } from "./server/supabase.ts";
+import { supabaseAdmin } from "./server/supabase.js";
 
 const app = express();
 const PORT = 3000;
@@ -37,6 +36,19 @@ const isSupabaseConfigured = () => {
   return url && !url.includes('placeholder');
 };
 
+// Helper to wrap promises with a timeout
+const withTimeout = <T>(promise: PromiseLike<T>, timeoutMs: number = 5000): Promise<T> => {
+  let timeoutHandle: NodeJS.Timeout;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeoutHandle = setTimeout(() => reject(new Error(`Operation timed out after ${timeoutMs}ms`)), timeoutMs);
+  });
+
+  return Promise.race([
+    Promise.resolve(promise),
+    timeoutPromise
+  ]).finally(() => clearTimeout(timeoutHandle));
+};
+
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
@@ -46,7 +58,7 @@ app.get("/api/health", async (req, res) => {
   let supabaseStatus = "not_configured";
   if (isSupabaseConfigured()) {
     try {
-      const { error } = await supabaseAdmin.from('resumes').select('id').limit(1);
+      const { error } = await withTimeout(supabaseAdmin.from('resumes').select('id').limit(1), 3000);
       supabaseStatus = error ? `error: ${error.message}` : "connected";
     } catch (e: any) {
       supabaseStatus = `critical_error: ${e.message}`;
@@ -56,7 +68,7 @@ app.get("/api/health", async (req, res) => {
   res.json({ 
     status: "ok", 
     env: process.env.NODE_ENV,
-    isVercel: !!process.env.VERCEL,
+    isVercel: !!process.env.VERCEL || !!process.env.VERCEL_ENV || !!process.env.VERCEL_URL,
     hasApiKey: !!(process.env.GEMINI_API_KEY || process.env.VITE_GEMINI_API_KEY),
     supabase: supabaseStatus
   });
@@ -88,11 +100,14 @@ app.post("/api/submit", async (req, res) => {
       const insertData: any = { content, status: 'pending' };
       if (uid) insertData.user_id = uid;
 
-      const { data: resume, error: resumeError } = await supabaseAdmin
-        .from('resumes')
-        .insert([insertData])
-        .select()
-        .single();
+      const { data: resume, error: resumeError } = await withTimeout(
+        supabaseAdmin
+          .from('resumes')
+          .insert([insertData])
+          .select()
+          .single(),
+        8000
+      );
 
       if (resumeError) {
         console.error("Supabase insert error:", resumeError);
@@ -106,9 +121,12 @@ app.post("/api/submit", async (req, res) => {
       if (uid) logData.user_id = uid;
 
       try {
-        await supabaseAdmin
-          .from('activity_logs')
-          .insert([logData]);
+        await withTimeout(
+          supabaseAdmin
+            .from('activity_logs')
+            .insert([logData]),
+          3000
+        );
       } catch (logErr) {
         console.warn("Failed to log activity, but resume was saved:", logErr);
       }
@@ -180,7 +198,7 @@ app.get("/api/resumes", checkAdmin, async (req, res) => {
         .order('created_at', { ascending: false })
         .limit(100); // Increased limit slightly
         
-      const { data: dbResumes, error } = await query;
+      const { data: dbResumes, error } = await withTimeout(query, 8000);
 
       if (error) {
         console.error("Supabase query error:", error);
@@ -243,11 +261,14 @@ app.get("/api/resumes/:id/status", async (req, res) => {
     
     try {
       if (!isSupabaseConfigured()) throw new Error("Supabase not configured");
-      const { data: resume, error } = await supabaseAdmin
-        .from('resumes')
-        .select('status, content')
-        .eq('id', id)
-        .single();
+      const { data: resume, error } = await withTimeout(
+        supabaseAdmin
+          .from('resumes')
+          .select('status, content')
+          .eq('id', id)
+          .single(),
+        8000
+      );
 
       if (error) throw error;
       
@@ -285,35 +306,46 @@ app.post("/api/approve", checkAdmin, async (req, res) => {
     try {
       if (!isSupabaseConfigured()) throw new Error("Supabase not configured");
       // 1. Update status to approved and clear rejected flag
-      const { data: currentResume, error: fetchError } = await supabaseAdmin
-        .from('resumes')
-        .select('content')
-        .eq('id', resumeId)
-        .single();
+      const { data: currentResume, error: fetchError } = await withTimeout(
+        supabaseAdmin
+          .from('resumes')
+          .select('content')
+          .eq('id', resumeId)
+          .single(),
+        8000
+      );
         
       if (fetchError) throw fetchError;
 
       const updatedContent = { ...currentResume.content };
       delete updatedContent.rejected;
 
-      const { data: resume, error: updateError } = await supabaseAdmin
-        .from('resumes')
-        .update({ 
-          status: 'approved',
-          content: updatedContent
-        })
-        .eq('id', resumeId)
-        .select()
-        .single();
+      const { data: resume, error: updateError } = await withTimeout(
+        supabaseAdmin
+          .from('resumes')
+          .update({ 
+            status: 'approved',
+            content: updatedContent
+          })
+          .eq('id', resumeId)
+          .select()
+          .single(),
+        8000
+      );
 
       if (updateError) throw updateError;
 
       // 2. Log the approval
-      await supabaseAdmin
-        .from('activity_logs')
-        .insert([
-          { action: 'resume_approved', details: { resume_id: resumeId, approved_by: 'admin' } }
-        ]);
+      try {
+        await withTimeout(
+          supabaseAdmin
+            .from('activity_logs')
+            .insert([
+              { action: 'resume_approved', details: { resume_id: resumeId, approved_by: 'admin' } }
+            ]),
+          3000
+        );
+      } catch (logErr) {}
 
       res.status(200).json({ message: "Resume approved successfully", resume });
     } catch (dbError: any) {
@@ -345,32 +377,43 @@ app.post("/api/reject", checkAdmin, async (req, res) => {
     try {
       if (!isSupabaseConfigured()) throw new Error("Supabase not configured");
       // 1. Fetch the current resume to get its content
-      const { data: currentResume, error: fetchError } = await supabaseAdmin
-        .from('resumes')
-        .select('content')
-        .eq('id', resumeId)
-        .single();
+      const { data: currentResume, error: fetchError } = await withTimeout(
+        supabaseAdmin
+          .from('resumes')
+          .select('content')
+          .eq('id', resumeId)
+          .single(),
+        8000
+      );
         
       if (fetchError) throw fetchError;
 
       // 2. Update status by setting a flag in the content JSONB (to bypass check constraint)
-      const { data: resume, error: updateError } = await supabaseAdmin
-        .from('resumes')
-        .update({ 
-          content: { ...currentResume.content, rejected: true } 
-        })
-        .eq('id', resumeId)
-        .select()
-        .single();
+      const { data: resume, error: updateError } = await withTimeout(
+        supabaseAdmin
+          .from('resumes')
+          .update({ 
+            content: { ...currentResume.content, rejected: true } 
+          })
+          .eq('id', resumeId)
+          .select()
+          .single(),
+        8000
+      );
 
       if (updateError) throw updateError;
 
       // 3. Log the rejection
-      await supabaseAdmin
-        .from('activity_logs')
-        .insert([
-          { action: 'resume_rejected', details: { resume_id: resumeId, rejected_by: 'admin' } }
-        ]);
+      try {
+        await withTimeout(
+          supabaseAdmin
+            .from('activity_logs')
+            .insert([
+              { action: 'resume_rejected', details: { resume_id: resumeId, rejected_by: 'admin' } }
+            ]),
+          3000
+        );
+      } catch (logErr) {}
 
       res.status(200).json({ message: "Resume rejected successfully", resume });
     } catch (dbError: any) {
@@ -402,7 +445,11 @@ app.post("/api/extract-doc", async (req, res) => {
     console.log("[DOC] Extracting .doc file...");
     const buffer = Buffer.from(fileBase64, 'base64');
     
-    const extractor = new WordExtractor();
+    // Dynamic import to avoid issues on Vercel startup
+    const WordExtractorModule = await import("word-extractor");
+    const Extractor = WordExtractorModule.default || (WordExtractorModule as any);
+    
+    const extractor = new Extractor();
     const extracted = await extractor.extract(buffer);
     const text = extracted.getBody();
 
@@ -438,7 +485,9 @@ app.use((err: any, req: express.Request, res: express.Response, next: express.Ne
 async function setupApp() {
   console.log("Starting server setup...");
   
-  if (!process.env.VERCEL) {
+  const isVercel = !!process.env.VERCEL || !!process.env.VERCEL_ENV || !!process.env.VERCEL_URL;
+  
+  if (!isVercel) {
     // Vite middleware for development
     if (process.env.NODE_ENV !== "production") {
       try {

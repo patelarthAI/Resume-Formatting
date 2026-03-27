@@ -41,7 +41,6 @@ const App: React.FC = () => {
   const [pendingResumeId, setPendingResumeId] = useState<string | null>(() => {
     return localStorage.getItem('pendingResumeId');
   });
-  const [backendStatus, setBackendStatus] = useState<any>(null);
 
   useEffect(() => {
     if (pendingResumeId) {
@@ -54,14 +53,8 @@ const App: React.FC = () => {
   useEffect(() => {
     fetch('/api/health')
       .then(res => res.json())
-      .then(data => {
-        console.log('Backend Health:', data);
-        setBackendStatus(data);
-      })
-      .catch(err => {
-        console.error('Backend Health Check Failed:', err);
-        setBackendStatus({ status: 'error', message: err.message });
-      });
+      .then(data => console.log('Backend Health:', data))
+      .catch(err => console.error('Backend Health Check Failed:', err));
   }, []);
 
   // Poll for approval status
@@ -69,13 +62,11 @@ const App: React.FC = () => {
     let intervalId: NodeJS.Timeout;
 
     if (appState === AppState.WAITING_APPROVAL && pendingResumeId) {
-      console.log("Polling for approval status for resume:", pendingResumeId);
       intervalId = setInterval(async () => {
         try {
           const res = await fetch(`/api/resumes/${pendingResumeId}/status`);
           if (res.ok) {
             const data = await res.json();
-            console.log("Approval status response:", data);
             if (data.status === 'approved') {
               clearInterval(intervalId);
               // Restore content from backend if we lost it due to refresh
@@ -102,12 +93,8 @@ const App: React.FC = () => {
   }, [appState, pendingResumeId]);
 
   const processApprovedResume = async (contentToProcess: any = stagedContent) => {
-    if (!contentToProcess) {
-      console.warn("No content to process in processApprovedResume");
-      return;
-    }
+    if (!contentToProcess) return;
     
-    console.log("Processing approved resume content:", contentToProcess);
     setAppState(AppState.PROCESSING);
     try {
       const formattedData = await extractResumeData({
@@ -117,12 +104,10 @@ const App: React.FC = () => {
         format: selectedFormat
       }, usePro);
       
-      console.log("Extracted resume data successfully:", formattedData);
       setResumeData(formattedData);
       setAppState(AppState.REVIEW);
       setPendingResumeId(null); // Clear the pending ID once we start reviewing
     } catch (err: any) {
-      console.error("Error during resume data extraction:", err);
       setErrorMsg(err.message);
       setAppState(AppState.ERROR);
       setPendingResumeId(null);
@@ -182,11 +167,7 @@ const App: React.FC = () => {
             const errorData = await response.json();
             errorMessage = errorData.error || errorMessage;
           } catch (e) {
-            if (response.status === 500) {
-              errorMessage = `Server error (500) during .doc extraction. This format can be tricky; please try saving as .docx or .pdf for better results.`;
-            } else {
-              errorMessage = `Server error (${response.status}). Please try again later.`;
-            }
+            errorMessage = `Server error (${response.status}). Please try again later.`;
           }
           throw new Error(errorMessage);
         }
@@ -258,11 +239,7 @@ const App: React.FC = () => {
           const errorData = await response.json();
           errorMessage = errorData.error || errorMessage;
         } catch (e) {
-          if (response.status === 500) {
-            errorMessage = `Server processing error (500). This might be due to a large file or database issue. Please try a smaller file or try again in a few minutes.`;
-          } else {
-            errorMessage = `Server error (${response.status}). Please try again later.`;
-          }
+          errorMessage = `Server error (${response.status}). Please try again later.`;
         }
         throw new Error(errorMessage);
       }
@@ -580,30 +557,7 @@ const App: React.FC = () => {
             )}
           </AnimatePresence>
         </div>
-        
-        {/* Footer */}
-        <footer className="w-full max-w-5xl mt-20 pt-8 border-t border-white/5">
-          <div className="flex flex-col md:flex-row items-center justify-between gap-4 text-slate-500 text-xs">
-            <p>© 2024 Precision Resume Formatter. All rights reserved.</p>
-            <div className="flex items-center gap-6">
-              {backendStatus && (
-                <div className="flex items-center gap-2">
-                  <div className={`w-2 h-2 rounded-full ${backendStatus.status === 'ok' ? 'bg-emerald-500' : 'bg-red-500'}`}></div>
-                  <span>Backend: {backendStatus.status === 'ok' ? 'Connected' : 'Error'}</span>
-                  {backendStatus.isVercel && <span className="px-1.5 py-0.5 bg-white/5 rounded text-[10px]">Vercel</span>}
-                </div>
-              )}
-              <button 
-                onClick={() => setShowAdmin(!showAdmin)}
-                className="hover:text-slate-300 transition-colors flex items-center gap-1.5"
-              >
-                <ShieldCheck className="w-3.5 h-3.5" />
-                Admin Portal
-              </button>
-            </div>
-          </div>
-        </footer>
-          </>
+        </>
         )}
       </div>
     </div>

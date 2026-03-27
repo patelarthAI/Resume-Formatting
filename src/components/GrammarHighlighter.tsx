@@ -60,8 +60,8 @@ const GrammarHighlighter: React.FC<GrammarHighlighterProps> = ({
       }
 
       const isSpelling = issue.type === 'SPELLING';
-      const highlightColor = isSpelling ? '#ef4444' : '#22c55e'; // Red for spelling, Green for others
-      const bgColor = isSpelling ? 'rgba(239, 68, 68, 0.1)' : 'rgba(34, 197, 94, 0.1)';
+      const highlightColor = isSpelling ? '#f87171' : '#4ade80'; // Red for spelling, Green for others
+      const bgColor = isSpelling ? '#fef2f2' : '#f0fdf4';
       const iconColor = isSpelling ? '#ef4444' : '#22c55e';
       const label = isSpelling ? 'Spelling Error' : (issue.type === 'GRAMMAR' ? 'Grammar Correction' : 'Writing Improvement');
 

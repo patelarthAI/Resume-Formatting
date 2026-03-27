@@ -4,6 +4,7 @@ import crypto from "crypto";
 console.log("Server starting...");
 import multer from "multer";
 import path from "path";
+import WordExtractor from "word-extractor";
 
 const upload = multer({ 
   storage: multer.memoryStorage(),
@@ -401,11 +402,7 @@ app.post("/api/extract-doc", async (req, res) => {
     console.log("[DOC] Extracting .doc file...");
     const buffer = Buffer.from(fileBase64, 'base64');
     
-    // Dynamic import to avoid issues on Vercel startup
-    const WordExtractor = (await import("word-extractor")).default || await import("word-extractor");
-    const Extractor = (WordExtractor as any).default || WordExtractor;
-    
-    const extractor = new Extractor();
+    const extractor = new WordExtractor();
     const extracted = await extractor.extract(buffer);
     const text = extracted.getBody();
 

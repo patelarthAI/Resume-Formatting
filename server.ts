@@ -43,6 +43,9 @@ const withTimeout = <T>(promise: PromiseLike<T>, timeoutMs: number = 5000): Prom
     timeoutHandle = setTimeout(() => reject(new Error(`Operation timed out after ${timeoutMs}ms`)), timeoutMs);
   });
 
+  // Prevent unhandled promise rejection if the original promise fails after timeout
+  Promise.resolve(promise).catch(() => {});
+
   return Promise.race([
     Promise.resolve(promise),
     timeoutPromise
@@ -104,7 +107,7 @@ app.post("/api/submit", async (req, res) => {
         supabaseAdmin
           .from('resumes')
           .insert([insertData])
-          .select()
+          .select('id')
           .single(),
         8000
       );
@@ -141,7 +144,7 @@ app.post("/api/submit", async (req, res) => {
       
       console.log(`Resume saved in-memory with ID: ${resumeId}. Total in-memory: ${inMemoryResumes.length}`);
       
-      res.status(200).json({ message: "Resume submitted successfully (in-memory)", resume: newResume });
+      res.status(200).json({ message: "Resume submitted successfully (in-memory)", resume: { id: resumeId } });
     }
   } catch (error: any) {
     console.error("Error submitting resume:", error);
@@ -194,9 +197,9 @@ app.get("/api/resumes", checkAdmin, async (req, res) => {
       console.log("Querying Supabase for resumes...");
       let query = supabaseAdmin
         .from('resumes')
-        .select('id, status, created_at, content')
+        .select('id, status, created_at, content->fileName, content->rejected')
         .order('created_at', { ascending: false })
-        .limit(100); // Increased limit slightly
+        .limit(50);
         
       const { data: dbResumes, error } = await withTimeout(query, 8000);
 
@@ -213,13 +216,16 @@ app.get("/api/resumes", checkAdmin, async (req, res) => {
 
       // Filter and map in JS for better reliability with JSONB
       let resumes = dbResumes.map((r: any) => {
+        // Handle both full content object (in-memory) and extracted fields (Supabase)
         const content = r.content || {};
-        const isRejected = content.rejected === true || content.rejected === 'true';
+        const isRejected = r.rejected === 'true' || r.rejected === true || content.rejected === true || content.rejected === 'true';
+        const fileName = r.fileName || content.fileName || 'Unknown';
+        
         return {
           id: r.id,
           status: isRejected ? 'rejected' : r.status,
           created_at: r.created_at,
-          fileName: content.fileName || 'Unknown',
+          fileName: fileName,
           rejected: isRejected
         };
       });
@@ -261,21 +267,41 @@ app.get("/api/resumes/:id/status", async (req, res) => {
     
     try {
       if (!isSupabaseConfigured()) throw new Error("Supabase not configured");
-      const { data: resume, error } = await withTimeout(
+      // 1. First fetch just the status to save bandwidth
+      const { data: statusData, error: statusError } = await withTimeout(
         supabaseAdmin
           .from('resumes')
-          .select('status, content')
+          .select('status, content->rejected')
           .eq('id', id)
           .single(),
         8000
       );
 
-      if (error) throw error;
+      if (statusError) throw statusError;
       
-      const currentStatus = resume.content?.rejected ? 'rejected' : resume.status;
+      const isRejected = statusData.rejected === 'true' || statusData.rejected === true;
+      const currentStatus = isRejected ? 'rejected' : statusData.status;
+      
+      let fullContent = undefined;
+      
+      // 2. Only fetch the massive content payload if approved (for frontend recovery)
+      if (currentStatus === 'approved') {
+        const { data: contentData, error: contentError } = await withTimeout(
+          supabaseAdmin
+            .from('resumes')
+            .select('content')
+            .eq('id', id)
+            .single(),
+          8000
+        );
+        if (!contentError && contentData) {
+          fullContent = contentData.content;
+        }
+      }
+
       res.status(200).json({ 
         status: currentStatus,
-        content: resume.content // Send content back so frontend can recover after refresh
+        content: fullContent // Only send content back if approved to save massive bandwidth during polling
       });
     } catch (dbError: any) {
       console.warn("Database error (falling back to in-memory):", dbError.message);
@@ -285,7 +311,7 @@ app.get("/api/resumes/:id/status", async (req, res) => {
       }
       res.status(200).json({ 
         status: resume.status,
-        content: resume.content 
+        content: resume.status === 'approved' ? resume.content : undefined 
       });
     }
   } catch (error: any) {
@@ -328,7 +354,7 @@ app.post("/api/approve", checkAdmin, async (req, res) => {
             content: updatedContent
           })
           .eq('id', resumeId)
-          .select()
+          .select('id')
           .single(),
         8000
       );
@@ -357,7 +383,7 @@ app.post("/api/approve", checkAdmin, async (req, res) => {
       }
       
       inMemoryResumes[resumeIndex].status = 'approved';
-      res.status(200).json({ message: "Resume approved successfully (in-memory)", resume: inMemoryResumes[resumeIndex] });
+      res.status(200).json({ message: "Resume approved successfully (in-memory)", resume: { id: resumeId } });
     }
   } catch (error: any) {
     console.error("Error approving resume:", error);
@@ -396,7 +422,7 @@ app.post("/api/reject", checkAdmin, async (req, res) => {
             content: { ...currentResume.content, rejected: true } 
           })
           .eq('id', resumeId)
-          .select()
+          .select('id')
           .single(),
         8000
       );
@@ -425,7 +451,7 @@ app.post("/api/reject", checkAdmin, async (req, res) => {
       }
       
       inMemoryResumes[resumeIndex].status = 'rejected';
-      res.status(200).json({ message: "Resume rejected successfully (in-memory)", resume: inMemoryResumes[resumeIndex] });
+      res.status(200).json({ message: "Resume rejected successfully (in-memory)", resume: { id: resumeId } });
     }
   } catch (error: any) {
     console.error("Error rejecting resume:", error);

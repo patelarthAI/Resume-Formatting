@@ -278,7 +278,7 @@ const grammarAnalysisTool: FunctionDeclaration = {
   },
 };
 
-export const analyzeGrammar = async (data: ResumeData, format: ResumeFormat, usePro: boolean = false): Promise<GrammarIssue[]> => {
+export const analyzeGrammar = async (data: ResumeData, format: ResumeFormat, usePro: boolean = false, tone: string = 'PROFESSIONAL'): Promise<GrammarIssue[]> => {
   return withModelFallback(async (modelId, apiKey) => {
     const ai = new GoogleGenAI({ apiKey });
     
@@ -287,24 +287,33 @@ export const analyzeGrammar = async (data: ResumeData, format: ResumeFormat, use
       contents: {
         parts: [
           {
-            text: `Review the following resume data for spelling, grammar, and professional writing improvements. The target style is ${format}.
+            text: `Review the following resume data for spelling, grammar, and professional writing improvements. 
+            The target style is ${format} and the desired tone is ${tone}.
             
-            STYLE-SPECIFIC INSTRUCTIONS:
+            STYLE & TONE INSTRUCTIONS:
+            - Tone: ${tone}. ${tone === 'CONFIDENT' ? 'Use strong, authoritative language.' : tone === 'DIRECT' ? 'Be concise and to the point.' : 'Maintain a balanced, professional executive tone.'}
             ${format === ResumeFormat.MODERN_EXECUTIVE 
               ? "- Ensure suggestions maintain a professional, expanded tone. Dates should remain in the 3-letter abbreviated format (e.g., 'Jan') as they will be expanded by the UI." 
               : "- Maintain a traditional, concise tone. Dates should remain abbreviated."}
 
             CRITICAL INSTRUCTIONS:
-            1. **Spelling**: You MUST identify and fix all standard **US English** spelling mistakes. This is your primary task. Categorize as 'SPELLING'.
+            1. **Spelling**: Identify and fix all spelling mistakes. Categorize as 'SPELLING'.
             2. **Grammar & Verb Tense**: Identify grammatical errors, incorrect verb tenses, or punctuation issues. Categorize as 'GRAMMAR'.
             3. **Resume Best Practices (Style)**: 
                - Suggest stronger action verbs (e.g., "Led" instead of "Was in charge of").
                - Identify passive voice and suggest active voice.
                - Categorize these as 'STYLE'.
-            4. **Context**: For each issue, explain WHY the change is recommended based on resume writing standards.
+            4. **Precision**: Act like Grammarly Premium. Be extremely picky about professional standards. Use Red highlighting for spelling and Green for grammar/style in your reasoning.
+            5. **Context**: For each issue, explain WHY the change is recommended based on resume writing standards.
             5. **Exclusions**: DO NOT flag technical terms, version numbers, framework names, or proper nouns unless clearly misspelled.
-            6. Return a list of issues using the 'save_grammar_issues' tool.
-            7. For each issue, provide:
+            6. **Replacement Integrity**: 
+               - 'errorText' MUST be the EXACT substring from the 'original' text.
+               - 'suggestions' MUST be drop-in replacements for 'errorText'. 
+               - If 'errorText' is a single word, 'suggestions' should be single words or short phrases that fit perfectly in the same spot.
+               - If 'errorText' is a whole sentence, 'suggestions' should be whole sentences.
+               - NEVER return a suggestion that is a partial correction of the 'errorText' if 'errorText' is a whole sentence.
+            7. Return a list of issues using the 'save_grammar_issues' tool.
+            8. For each issue, provide:
                - 'path': The exact JSON path (dot notation).
                - 'original': The FULL text content of that field.
                - 'errorText': The EXACT substring within 'original' that is incorrect or could be improved.
@@ -407,7 +416,6 @@ export const extractResumeData = async (
         parts: parts,
       },
       config: {
-        thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
         systemInstruction: `
 ACT AS A SECURE RESUME ARCHITECT. Provide expert-level resume formatting, focusing on ATS-optimization, high-impact action verbs, and clean structural hierarchy.
 `,

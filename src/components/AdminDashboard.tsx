@@ -21,10 +21,22 @@ const AdminDashboard: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('pending');
+  const [healthStatus, setHealthStatus] = useState<any>(null);
+
+  const checkHealth = async () => {
+    try {
+      const response = await fetch('/api/health');
+      const data = await response.json();
+      setHealthStatus(data);
+    } catch (err: any) {
+      setHealthStatus({ error: err.message });
+    }
+  };
 
   useEffect(() => {
     if (adminPassword) {
       fetchResumes();
+      checkHealth();
     } else {
       setLoading(false);
     }
@@ -55,8 +67,15 @@ const AdminDashboard: React.FC = () => {
         }
         let errorMessage = 'Failed to fetch resumes';
         try {
-          const errorData = await response.json();
-          errorMessage = errorData.error || errorMessage;
+          const responseText = await response.text();
+          console.log(`Server error response body: ${responseText}`);
+          try {
+            const errorData = JSON.parse(responseText);
+            errorMessage = errorData.error || errorData.message || errorMessage;
+          } catch (e) {
+            // If not JSON, show the first part of the response text
+            errorMessage = `Server error (${response.status}): ${responseText.substring(0, 100)}${responseText.length > 100 ? '...' : ''}`;
+          }
         } catch (e) {
           errorMessage = `Server error (${response.status}). Please try again later.`;
         }
@@ -166,7 +185,39 @@ const AdminDashboard: React.FC = () => {
           <h1 className="text-2xl font-bold text-white">Admin Dashboard</h1>
           <p className="text-slate-400 text-sm mt-1">Manage resume submissions</p>
         </div>
+
+        {/* Health Status (Debug) */}
+        {healthStatus && (
+          <div className="mb-6 p-4 bg-white/5 rounded-lg border border-white/10 text-xs font-mono">
+            <h3 className="font-bold mb-2 text-slate-300 flex items-center gap-2">
+              <AlertTriangle className="w-3 h-3 text-amber-500" />
+              System Health (Debug)
+            </h3>
+            <pre className="overflow-auto max-h-32 text-slate-400">
+              {JSON.stringify(healthStatus, null, 2)}
+            </pre>
+            {healthStatus.storage === 'memory' && (
+              <div className="mt-2 p-2 bg-amber-500/10 border border-amber-500/20 rounded text-amber-200 text-[10px]">
+                <strong>Warning:</strong> Using in-memory storage. Data will be lost when the server restarts (common on Vercel). Please configure Supabase for persistence.
+              </div>
+            )}
+            <button 
+              onClick={checkHealth}
+              className="mt-2 text-indigo-400 hover:text-indigo-300 underline"
+            >
+              Refresh Health
+            </button>
+          </div>
+        )}
         <div className="flex items-center gap-4">
+          <button 
+            onClick={fetchResumes}
+            disabled={loading}
+            className="p-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-slate-300 transition-colors disabled:opacity-50"
+            title="Refresh"
+          >
+            <Clock className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+          </button>
           <button 
             onClick={handleLogout}
             className="p-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-slate-300 transition-colors"
@@ -229,7 +280,7 @@ const AdminDashboard: React.FC = () => {
                 </div>
                 <div>
                   <h4 className="text-white font-medium break-all">
-                    {resume.content?.fileName || 'Unnamed Resume'}
+                    {(resume as any).fileName || resume.content?.fileName || 'Unnamed Resume'}
                   </h4>
                   <div className="flex items-center gap-3 text-sm text-slate-400 mt-1">
                     <span>ID: {resume.id.substring(0, 8)}...</span>

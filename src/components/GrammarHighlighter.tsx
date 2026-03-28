@@ -60,10 +60,11 @@ const GrammarHighlighter: React.FC<GrammarHighlighterProps> = ({
       }
 
       const isSpelling = issue.type === 'SPELLING';
-      const highlightColor = isSpelling ? '#ef4444' : '#22c55e'; // Red for spelling, Green for others
-      const bgColor = isSpelling ? 'rgba(239, 68, 68, 0.1)' : 'rgba(34, 197, 94, 0.1)';
-      const iconColor = isSpelling ? '#ef4444' : '#22c55e';
-      const label = isSpelling ? 'Spelling Error' : (issue.type === 'GRAMMAR' ? 'Grammar Correction' : 'Writing Improvement');
+      const isStyle = issue.type === 'STYLE';
+      const highlightColor = isSpelling ? '#ef4444' : (isStyle ? '#8b5cf6' : '#22c55e'); 
+      const bgColor = isSpelling ? 'rgba(239, 68, 68, 0.1)' : (isStyle ? 'rgba(139, 92, 246, 0.1)' : 'rgba(34, 197, 94, 0.1)');
+      const iconColor = isSpelling ? '#ef4444' : (isStyle ? '#8b5cf6' : '#22c55e');
+      const label = isSpelling ? 'Spelling Error' : (isStyle ? 'Style Suggestion' : 'Grammar Correction');
 
       result.push(
         <span key={issue.id} className="relative inline-block" style={{ zIndex: activeIssueId === issue.id ? 50 : 1 }}>
@@ -145,7 +146,7 @@ const GrammarHighlighter: React.FC<GrammarHighlighterProps> = ({
                             className={`text-left px-2 py-1.5 text-sm font-medium rounded transition-colors border border-transparent ${
                                 isSpelling 
                                 ? 'hover:bg-red-100 text-red-700 hover:border-red-200' 
-                                : 'hover:bg-green-100 text-green-700 hover:border-green-200'
+                                : (isStyle ? 'hover:bg-purple-100 text-purple-700 hover:border-purple-200' : 'hover:bg-green-100 text-green-700 hover:border-green-200')
                             }`}
                         >
                             {suggestion}

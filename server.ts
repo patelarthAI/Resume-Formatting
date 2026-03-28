@@ -40,6 +40,39 @@ async function setupApp() {
     return url && !url.includes('placeholder');
   };
 
+  // Background task to clean up old pending resumes
+  const autoRejectOldResumes = async () => {
+    if (!isSupabaseConfigured()) return;
+    try {
+      const twoMinutesAgo = new Date(Date.now() - 2 * 60 * 1000).toISOString();
+      const { data: oldResumes, error: fetchError } = await supabaseAdmin
+        .from('resumes')
+        .select('id, content')
+        .eq('status', 'pending')
+        .is('content->>rejected', null)
+        .lt('created_at', twoMinutesAgo);
+        
+      if (fetchError) throw fetchError;
+      
+      if (oldResumes && oldResumes.length > 0) {
+        console.log(`Auto-rejecting ${oldResumes.length} old resumes...`);
+        for (const r of oldResumes) {
+          const updatedContent = { ...(r.content || {}), rejected: true, auto_rejected: true };
+          await supabaseAdmin
+            .from('resumes')
+            .update({ content: updatedContent })
+            .eq('id', r.id);
+            
+          await supabaseAdmin
+            .from('activity_logs')
+            .insert([{ action: 'resume_auto_rejected', details: { resume_id: r.id } }]);
+        }
+      }
+    } catch (err) {
+      console.error("Error auto-rejecting resumes:", err);
+    }
+  };
+
   // API Route for submitting a resume
   app.post("/api/submit", async (req, res) => {
     try {
@@ -118,6 +151,9 @@ async function setupApp() {
     try {
       const { status } = req.query;
       
+      // Trigger background cleanup asynchronously
+      autoRejectOldResumes().catch(err => console.error("Background cleanup error:", err));
+      
       try {
         if (!isSupabaseConfigured()) throw new Error("Supabase not configured");
         
@@ -138,15 +174,45 @@ async function setupApp() {
 
         if (error) throw error;
         
+        const now = Date.now();
         // Map the status for the frontend
-        const resumes = dbResumes.map(r => ({
-          ...r,
-          status: r.content?.rejected ? 'rejected' : r.status
-        }));
+        let resumes = dbResumes.map(r => {
+          let currentStatus = r.content?.rejected ? 'rejected' : r.status;
+          let content = r.content;
+          if (currentStatus === 'pending' && (now - new Date(r.created_at).getTime() > 2 * 60 * 1000)) {
+            currentStatus = 'rejected';
+            content = { ...(content || {}), rejected: true, auto_rejected: true };
+          }
+          return {
+            ...r,
+            content,
+            status: currentStatus
+          };
+        });
+
+        // Re-filter in memory to account for lazy rejections
+        if (status && typeof status === 'string') {
+          if (status === 'rejected') {
+            // If we asked for rejected, we might have missed the lazily rejected ones in the DB query.
+            // But we can't easily fix that without fetching all pending resumes.
+            // Let's just rely on the background job to update them for the next fetch.
+          }
+          resumes = resumes.filter(r => r.status === status);
+        }
 
         res.status(200).json({ resumes });
       } catch (dbError: any) {
         console.warn("Database error (falling back to in-memory):", dbError.message);
+        const now = Date.now();
+        
+        // Apply lazy rejection to in-memory resumes
+        inMemoryResumes.forEach(r => {
+          if (r.status === 'pending' && (now - new Date(r.created_at).getTime() > 2 * 60 * 1000)) {
+            r.status = 'rejected';
+            r.content = { ...(r.content || {}), rejected: true, auto_rejected: true };
+          }
+        });
+
         let filtered = inMemoryResumes;
         if (status && typeof status === 'string') {
           filtered = filtered.filter(r => r.status === status);
@@ -168,13 +234,41 @@ async function setupApp() {
         if (!isSupabaseConfigured()) throw new Error("Supabase not configured");
         const { data: resume, error } = await supabaseAdmin
           .from('resumes')
-          .select('status, content')
+          .select('id, status, content, created_at')
           .eq('id', id)
           .single();
 
         if (error) throw error;
         
-        const currentStatus = resume.content?.rejected ? 'rejected' : resume.status;
+        let currentStatus = resume.content?.rejected ? 'rejected' : resume.status;
+        
+        // Auto-reject if pending and older than 2 minutes
+        if (currentStatus === 'pending') {
+          const createdAt = new Date(resume.created_at).getTime();
+          if (Date.now() - createdAt > 2 * 60 * 1000) {
+            currentStatus = 'rejected';
+            
+            // Update in background
+            const updatedContent = { ...(resume.content || {}), rejected: true, auto_rejected: true };
+            resume.content = updatedContent;
+            
+            (async () => {
+              try {
+                await supabaseAdmin
+                  .from('resumes')
+                  .update({ content: updatedContent })
+                  .eq('id', resume.id);
+                
+                await supabaseAdmin
+                  .from('activity_logs')
+                  .insert([{ action: 'resume_auto_rejected', details: { resume_id: resume.id } }]);
+              } catch (err) {
+                console.error("Error auto-rejecting resume:", err);
+              }
+            })();
+          }
+        }
+
         res.status(200).json({ 
           status: currentStatus,
           content: resume.content // Send content back so frontend can recover after refresh
@@ -185,6 +279,12 @@ async function setupApp() {
         if (!resume) {
           return res.status(404).json({ error: "Resume not found" });
         }
+        
+        if (resume.status === 'pending' && (Date.now() - new Date(resume.created_at).getTime() > 2 * 60 * 1000)) {
+          resume.status = 'rejected';
+          resume.content = { ...(resume.content || {}), rejected: true, auto_rejected: true };
+        }
+        
         res.status(200).json({ 
           status: resume.status,
           content: resume.content 

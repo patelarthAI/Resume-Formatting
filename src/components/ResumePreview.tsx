@@ -23,7 +23,6 @@ const ResumePreview: React.FC<ResumePreviewProps> = ({ data, onDownload, onReset
   console.log("ResumePreview mounting with data:", data);
   const [isChecking, setIsChecking] = useState(false);
   const [issues, setIssues] = useState<GrammarIssue[]>([]);
-  const [tone, setTone] = useState<'PROFESSIONAL' | 'CONFIDENT' | 'DIRECT'>('PROFESSIONAL');
 
   const [changeLog, setChangeLog] = useState<ChangeLogItem[]>(() => {
     if (data.extractionChanges) {
@@ -178,8 +177,7 @@ const ResumePreview: React.FC<ResumePreviewProps> = ({ data, onDownload, onReset
   const handleCheckGrammar = async () => {
     setIsChecking(true);
     try {
-      // Pass tone to analyzeGrammar (I'll update the service too)
-      const foundIssues = await analyzeGrammar(data, selectedFormat, usePro, tone);
+      const foundIssues = await analyzeGrammar(data, selectedFormat, usePro);
       setIssues(foundIssues);
       if (foundIssues.length === 0) {
         alert("No grammar issues found!");
@@ -363,16 +361,6 @@ const ResumePreview: React.FC<ResumePreviewProps> = ({ data, onDownload, onReset
                 <div className="flex gap-3">
                     {/* Removed ATS Score */}
                     
-                    <select 
-                        value={tone}
-                        onChange={(e) => setTone(e.target.value as any)}
-                        className="bg-white/5 border border-white/10 rounded-lg px-3 py-1.5 text-xs font-medium text-slate-300 focus:outline-none focus:ring-2 focus:ring-indigo-500/50"
-                    >
-                        <option value="PROFESSIONAL">Professional</option>
-                        <option value="CONFIDENT">Confident</option>
-                        <option value="DIRECT">Direct</option>
-                    </select>
-
                     <button
                         onClick={onReset}
                         className="px-4 py-2 text-sm font-medium text-slate-300 hover:text-white hover:bg-white/5 rounded-lg transition-colors"
@@ -787,7 +775,7 @@ const ResumePreview: React.FC<ResumePreviewProps> = ({ data, onDownload, onReset
                         <div key={issue.id} className="p-3 rounded-xl bg-white/5 border border-white/5 hover:bg-white/10 transition-colors group">
                             <div className="flex items-center justify-between mb-1">
                                 <span className={`text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded ${
-                                    issue.type === 'SPELLING' ? 'bg-red-500/20 text-red-300' : 'bg-indigo-500/20 text-indigo-300'
+                                    issue.type === 'SPELLING' ? 'bg-red-500/20 text-red-300' : (issue.type === 'STYLE' ? 'bg-purple-500/20 text-purple-300' : 'bg-emerald-500/20 text-emerald-300')
                                 }`}>
                                     {issue.type}
                                 </span>
@@ -816,7 +804,58 @@ const ResumePreview: React.FC<ResumePreviewProps> = ({ data, onDownload, onReset
             </motion.div>
         )}
 
-        {/* Removed Modification Log Panel */}
+        {/* Modification Log Panel */}
+        {changeLog.length > 0 && (
+            <motion.div 
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-3xl p-6 shadow-xl"
+            >
+                <div className="flex items-center gap-2 mb-6 pb-4 border-b border-white/10">
+                    <History className="w-5 h-5 text-indigo-400" />
+                    <h3 className="text-lg font-bold text-white">Change Log</h3>
+                </div>
+
+                <div className="space-y-4 max-h-[400px] overflow-y-auto pr-2 custom-scrollbar">
+                    {changeLog.map((log) => (
+                        <div key={log.id} className="p-4 rounded-xl bg-white/5 border border-white/5 hover:bg-white/10 transition-colors group">
+                            <div className="flex items-center justify-between mb-2">
+                                <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded bg-indigo-500/20 text-indigo-300">
+                                    {log.path.split('.').pop()}
+                                </span>
+                                <span className="text-[10px] text-slate-500 font-medium">
+                                    {new Date(log.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                </span>
+                            </div>
+                            
+                            <div className="space-y-2">
+                                <div className="text-xs text-slate-400 line-through opacity-70">
+                                    "{log.original}"
+                                </div>
+                                <div className="flex items-start gap-2 text-sm text-slate-200">
+                                    <ArrowRight className="w-4 h-4 text-emerald-400 mt-0.5 flex-shrink-0" />
+                                    <span>"{log.new}"</span>
+                                </div>
+                            </div>
+
+                            <div className="mt-4 flex items-center justify-between pt-3 border-t border-white/5">
+                                <span className="text-[10px] text-slate-400 italic">
+                                    {log.reason}
+                                </span>
+                                {log.path !== "Extraction" && (
+                                    <button 
+                                        onClick={() => handleUndoChange(log)}
+                                        className="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1 text-[10px] font-bold text-rose-400 hover:text-rose-300 hover:bg-rose-500/10 px-2 py-1 rounded"
+                                    >
+                                        <Undo2 className="w-3 h-3" /> Undo
+                                    </button>
+                                )}
+                            </div>
+                        </div>
+                    ))}
+                </div>
+            </motion.div>
+        )}
       </div>
     </div>
   );

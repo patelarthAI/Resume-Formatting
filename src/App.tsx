@@ -85,7 +85,11 @@ const App: React.FC = () => {
               processApprovedResume(data.content || stagedContent);
             } else if (data.status === 'rejected') {
               clearInterval(intervalId);
-              setErrorMsg("Your resume submission was rejected by the administrator.");
+              if (data.content?.auto_rejected) {
+                setErrorMsg("Your resume submission timed out (2 minutes) and was automatically rejected.");
+              } else {
+                setErrorMsg("Your resume submission was rejected by the administrator.");
+              }
               setAppState(AppState.ERROR);
               setPendingResumeId(null);
             }

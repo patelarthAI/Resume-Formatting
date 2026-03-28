@@ -315,7 +315,8 @@ const AdminDashboard: React.FC = () => {
               )}
               {statusFilter === 'rejected' && (
                 <div className="flex items-center gap-2 text-red-400 text-sm font-medium">
-                  <XCircle className="w-4 h-4" /> Rejected
+                  <XCircle className="w-4 h-4" /> 
+                  {resume.content?.auto_rejected ? 'Auto-Rejected (Timeout)' : 'Rejected'}
                 </div>
               )}
             </motion.div>

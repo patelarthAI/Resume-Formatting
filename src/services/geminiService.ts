@@ -278,7 +278,7 @@ const grammarAnalysisTool: FunctionDeclaration = {
   },
 };
 
-export const analyzeGrammar = async (data: ResumeData, format: ResumeFormat, usePro: boolean = false, tone: string = 'PROFESSIONAL'): Promise<GrammarIssue[]> => {
+export const analyzeGrammar = async (data: ResumeData, format: ResumeFormat, usePro: boolean = false): Promise<GrammarIssue[]> => {
   return withModelFallback(async (modelId, apiKey) => {
     const ai = new GoogleGenAI({ apiKey });
     
@@ -287,33 +287,26 @@ export const analyzeGrammar = async (data: ResumeData, format: ResumeFormat, use
       contents: {
         parts: [
           {
-            text: `Review the following resume data for spelling, grammar, and professional writing improvements. 
-            The target style is ${format} and the desired tone is ${tone}.
+            text: `Review the following resume data for spelling, grammar, and smart stylistic improvements. 
             
-            STYLE & TONE INSTRUCTIONS:
-            - Tone: ${tone}. ${tone === 'CONFIDENT' ? 'Use strong, authoritative language.' : tone === 'DIRECT' ? 'Be concise and to the point.' : 'Maintain a balanced, professional executive tone.'}
-            ${format === ResumeFormat.MODERN_EXECUTIVE 
-              ? "- Ensure suggestions maintain a professional, expanded tone. Dates should remain in the 3-letter abbreviated format (e.g., 'Jan') as they will be expanded by the UI." 
-              : "- Maintain a traditional, concise tone. Dates should remain abbreviated."}
-
             CRITICAL INSTRUCTIONS:
-            1. **Spelling**: Identify and fix all spelling mistakes. Categorize as 'SPELLING'.
-            2. **Grammar & Verb Tense**: Identify grammatical errors, incorrect verb tenses, or punctuation issues. Categorize as 'GRAMMAR'.
-            3. **Resume Best Practices (Style)**: 
-               - Suggest stronger action verbs (e.g., "Led" instead of "Was in charge of").
-               - Identify passive voice and suggest active voice.
+            1. **Spelling**: Identify and fix clear spelling mistakes. Categorize as 'SPELLING'.
+            2. **Grammar & Verb Tense**: Identify obvious grammatical errors, incorrect verb tenses, or punctuation issues. Categorize as 'GRAMMAR'.
+            3. **Smart Resume Coach (Style)**: 
+               - Suggest high-impact, context-aware improvements to phrasing.
+               - DO NOT just swap single words if it makes the sentence read awkwardly. Instead, select the entire phrase or sentence as the 'errorText' and provide a fully rewritten, polished version as the 'suggestion'.
+               - Ensure suggestions make logical sense for the specific line, industry, and context.
                - Categorize these as 'STYLE'.
-            4. **Precision**: Act like Grammarly Premium. Be extremely picky about professional standards. Use Red highlighting for spelling and Green for grammar/style in your reasoning.
-            5. **Context**: For each issue, explain WHY the change is recommended based on resume writing standards.
-            5. **Exclusions**: DO NOT flag technical terms, version numbers, framework names, or proper nouns unless clearly misspelled.
-            6. **Replacement Integrity**: 
+            4. **Precision & Safety**: DO NOT change dates, numbers, metrics, factual information, or proper nouns. DO NOT hallucinate new skills or experiences.
+            5. **Context**: For each issue, explain WHY the change is recommended (e.g., "Using 'Spearheaded' instead of 'Led' adds more executive impact, and restructuring the sentence highlights the 30% metric better.").
+            6. **Exclusions**: DO NOT flag technical terms, version numbers, framework names, dates, or proper nouns.
+            7. **Replacement Integrity**: 
                - 'errorText' MUST be the EXACT substring from the 'original' text.
                - 'suggestions' MUST be drop-in replacements for 'errorText'. 
-               - If 'errorText' is a single word, 'suggestions' should be single words or short phrases that fit perfectly in the same spot.
                - If 'errorText' is a whole sentence, 'suggestions' should be whole sentences.
                - NEVER return a suggestion that is a partial correction of the 'errorText' if 'errorText' is a whole sentence.
-            7. Return a list of issues using the 'save_grammar_issues' tool.
-            8. For each issue, provide:
+            8. Return a list of issues using the 'save_grammar_issues' tool.
+            9. For each issue, provide:
                - 'path': The exact JSON path (dot notation).
                - 'original': The FULL text content of that field.
                - 'errorText': The EXACT substring within 'original' that is incorrect or could be improved.
@@ -328,7 +321,7 @@ export const analyzeGrammar = async (data: ResumeData, format: ResumeFormat, use
       },
       config: {
         systemInstruction: `
-ACT AS A SECURE RESUME ARCHITECT. Provide expert-level resume formatting, focusing on ATS-optimization, high-impact action verbs, and clean structural hierarchy.
+ACT AS A SMART RESUME COACH. You are allowed to fix objective spelling and grammar errors, and provide high-impact stylistic improvements. You are forbidden from hallucinating facts, changing metrics, or altering dates.
 `,
         tools: [{ functionDeclarations: [grammarAnalysisTool] }],
         toolConfig: { 
@@ -485,18 +478,15 @@ export const checkSpelling = async (data: ResumeData, format: ResumeFormat, useP
       contents: {
         parts: [
           {
-            text: `Review the following resume data for spelling and grammar errors. The target style is ${format}.
+            text: `Review the following resume data STRICTLY for spelling and grammar errors.
             
-            STYLE-SPECIFIC INSTRUCTIONS:
-            ${format === ResumeFormat.MODERN_EXECUTIVE 
-              ? "- Use a professional, expanded tone. Ensure dates follow the 3-letter abbreviation rule (e.g., 'Jan')." 
-              : "- Use a traditional, concise tone. Ensure dates follow the 3-letter abbreviation rule."}
-
             CRITICAL INSTRUCTIONS:
-            1. Fix standard English spelling and grammar mistakes.
+            1. Fix standard English spelling and grammar mistakes ONLY.
             2. DO NOT change any technical terms, version numbers, framework names, or proper nouns (e.g., 'React', 'v14.2', 'K8s', 'Kubernetes', 'SQL', 'NoSQL').
-            3. DO NOT change the structure of the data.
-            4. Return the corrected JSON using the 'save_resume_data' tool.
+            3. DO NOT change dates, numbers, or factual information.
+            4. DO NOT make stylistic changes, change vocabulary, or alter the tone.
+            5. DO NOT change the structure of the data.
+            6. Return the corrected JSON using the 'save_resume_data' tool.
             
             DATA:
             ${JSON.stringify(data)}`
@@ -505,7 +495,7 @@ export const checkSpelling = async (data: ResumeData, format: ResumeFormat, useP
       },
       config: {
         systemInstruction: `
-ACT AS A SECURE RESUME ARCHITECT. Provide expert-level resume formatting, focusing on ATS-optimization, high-impact action verbs, and clean structural hierarchy.
+ACT AS A STRICT PROOFREADER. You are only allowed to fix objective spelling and grammar errors. You are forbidden from making stylistic changes, changing vocabulary, or altering the tone.
 `,
         tools: [{ functionDeclarations: [saveResumeTool] }],
         toolConfig: { 

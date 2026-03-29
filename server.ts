@@ -156,7 +156,7 @@ async function setupApp() {
         
         let query = supabaseAdmin
           .from('resumes')
-          .select('*')
+          .select('id, status, created_at, content->fileName, content->rejected, content->auto_rejected')
           .order('created_at', { ascending: false });
           
         if (status === 'pending') {
@@ -173,7 +173,7 @@ async function setupApp() {
         
         // Map the status for the frontend
         let resumes = dbResumes.map(r => {
-          let currentStatus = r.content?.rejected ? 'rejected' : r.status;
+          let currentStatus = (r.rejected || r.content?.rejected) ? 'rejected' : r.status;
           return {
             ...r,
             status: currentStatus

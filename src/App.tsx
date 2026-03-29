@@ -19,6 +19,10 @@ import {
   Clock
 } from 'lucide-react';
 import * as mammoth from 'mammoth';
+import * as pdfjsLib from 'pdfjs-dist';
+
+// Configure PDF.js worker
+pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
 
 interface StagedContent {
   text?: string;
@@ -188,6 +192,8 @@ const App: React.FC = () => {
           } catch (e) {
             if (response.status === 500) {
               errorMessage = `Server error (500) during .doc extraction. This format can be tricky; please try saving as .docx or .pdf for better results.`;
+            } else if (response.status === 413) {
+              errorMessage = `File is too large for the server to process. Please convert it to .docx or .pdf and try again.`;
             } else {
               errorMessage = `Server error (${response.status}). Please try again later.`;
             }
@@ -213,21 +219,70 @@ const App: React.FC = () => {
         return;
       }
 
-      // 3. PDF / Image Handling (Base64)
-      const validVisualTypes = ['application/pdf', 'image/jpeg', 'image/png', 'image/webp'];
-      if (validVisualTypes.includes(file.type)) {
-        const base64Data = await new Promise<string>((resolve, reject) => {
+      // 3. PDF Handling (Extract Text Client-Side)
+      if (file.type === 'application/pdf' || file.name.endsWith('.pdf')) {
+        try {
+          const arrayBuffer = await file.arrayBuffer();
+          const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+          let fullText = '';
+          for (let i = 1; i <= pdf.numPages; i++) {
+            const page = await pdf.getPage(i);
+            const textContent = await page.getTextContent();
+            const pageText = textContent.items.map((item: any) => item.str).join(' ');
+            fullText += pageText + '\n';
+          }
+          
+          if (!fullText.trim()) {
+             throw new Error("Could not extract text from this PDF. It might be a scanned image.");
+          }
+          
+          setStagedContent({ text: fullText, mimeType: 'text/plain', fileName: file.name });
+          return;
+        } catch (pdfError: any) {
+          console.error("PDF Extraction Error:", pdfError);
+          throw new Error("Failed to read PDF. " + (pdfError.message || ""));
+        }
+      }
+
+      // 4. Image Handling (Compress and Base64)
+      const validImageTypes = ['image/jpeg', 'image/png', 'image/webp'];
+      if (validImageTypes.includes(file.type)) {
+        const compressedBase64 = await new Promise<string>((resolve, reject) => {
           const reader = new FileReader();
           reader.readAsDataURL(file);
-          reader.onload = () => {
-            const result = reader.result as string;
-            const base64 = result.split(',')[1];
-            resolve(base64);
+          reader.onload = (e) => {
+            const img = new Image();
+            img.src = e.target?.result as string;
+            img.onload = () => {
+              const canvas = document.createElement('canvas');
+              let width = img.width;
+              let height = img.height;
+              
+              // Max dimension 1200px
+              const MAX_DIM = 1200;
+              if (width > height && width > MAX_DIM) {
+                height *= MAX_DIM / width;
+                width = MAX_DIM;
+              } else if (height > MAX_DIM) {
+                width *= MAX_DIM / height;
+                height = MAX_DIM;
+              }
+              
+              canvas.width = width;
+              canvas.height = height;
+              const ctx = canvas.getContext('2d');
+              ctx?.drawImage(img, 0, 0, width, height);
+              
+              // Compress to JPEG with 0.7 quality
+              const dataUrl = canvas.toDataURL('image/jpeg', 0.7);
+              resolve(dataUrl.split(',')[1]);
+            };
+            img.onerror = () => reject(new Error("Failed to load image for compression"));
           };
           reader.onerror = (error) => reject(error);
         });
 
-        setStagedContent({ base64: base64Data, mimeType: file.type, fileName: file.name });
+        setStagedContent({ base64: compressedBase64, mimeType: 'image/jpeg', fileName: file.name });
         return;
       }
 
@@ -264,6 +319,8 @@ const App: React.FC = () => {
         } catch (e) {
           if (response.status === 500) {
             errorMessage = `Server processing error (500). This might be due to a large file or database issue. Please try a smaller file or try again in a few minutes.`;
+          } else if (response.status === 413) {
+            errorMessage = `File is too large for the server to process. Please try a smaller file.`;
           } else {
             errorMessage = `Server error (${response.status}). Please try again later.`;
           }

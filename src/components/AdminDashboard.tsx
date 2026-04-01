@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { CheckCircle, XCircle, Clock, FileText, AlertTriangle, LogOut, X } from 'lucide-react';
+import { CheckCircle, XCircle, Clock, FileText, AlertTriangle, LogOut, X, RefreshCw } from 'lucide-react';
 import Login from './Login';
 
 interface PendingResume {
@@ -193,7 +193,7 @@ const AdminDashboard: React.FC = () => {
             className="p-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg text-slate-300 transition-colors disabled:opacity-50"
             title="Refresh"
           >
-            <Clock className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+            <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
           </button>
           <button 
             onClick={handleLogout}

@@ -42,35 +42,7 @@ async function setupApp() {
 
   // Background task to clean up old pending resumes
   const autoRejectOldResumes = async () => {
-    if (!isSupabaseConfigured()) return;
-    try {
-      const twoMinutesAgo = new Date(Date.now() - 2 * 60 * 1000).toISOString();
-      const { data: oldResumes, error: fetchError } = await supabaseAdmin
-        .from('resumes')
-        .select('id, content')
-        .eq('status', 'pending')
-        .is('content->>rejected', null)
-        .lt('created_at', twoMinutesAgo);
-        
-      if (fetchError) throw fetchError;
-      
-      if (oldResumes && oldResumes.length > 0) {
-        console.log(`Auto-rejecting ${oldResumes.length} old resumes...`);
-        for (const r of oldResumes) {
-          const updatedContent = { ...(r.content || {}), rejected: true, auto_rejected: true };
-          await supabaseAdmin
-            .from('resumes')
-            .update({ content: updatedContent })
-            .eq('id', r.id);
-            
-          await supabaseAdmin
-            .from('activity_logs')
-            .insert([{ action: 'resume_auto_rejected', details: { resume_id: r.id } }]);
-        }
-      }
-    } catch (err) {
-      console.error("Error auto-rejecting resumes:", err);
-    }
+    // Auto-rejection logic removed as per user request
   };
 
   // API Route for submitting a resume
@@ -173,7 +145,7 @@ async function setupApp() {
         
         // Map the status for the frontend
         let resumes = dbResumes.map(r => {
-          let currentStatus = (r.rejected || r.content?.rejected) ? 'rejected' : r.status;
+          let currentStatus = (r.rejected || (r as any).content?.rejected) ? 'rejected' : r.status;
           return {
             ...r,
             status: currentStatus

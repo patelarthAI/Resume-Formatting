@@ -309,9 +309,9 @@ const ResumePreview: React.FC<ResumePreviewProps> = ({ data, onDownload, onReset
     }
   };
 
-  const handleDownloadPDF = () => {
+  const handleDownloadPDF = async () => {
     try {
-      generateResumePDF(data, selectedFormat);
+      await generateResumePDF(data, selectedFormat);
     } catch (err) {
       console.error("PDF generation failed", err);
       alert("Failed to generate PDF.");

@@ -1,22 +1,4 @@
-import * as pdfMake from "pdfmake/build/pdfmake";
-import * as pdfFonts from "pdfmake/build/vfs_fonts";
 import { ResumeData, ResumeFormat } from "@/types";
-
-// Initialize fonts
-try {
-  const pm = (pdfMake as any).default || pdfMake;
-  const pf = (pdfFonts as any).default || pdfFonts;
-  
-  if (pm && pf) {
-    if (pf.pdfMake && pf.pdfMake.vfs) {
-      pm.vfs = pf.pdfMake.vfs;
-    } else if (pf.vfs) {
-      pm.vfs = pf.vfs;
-    }
-  }
-} catch (e) {
-  console.error("Failed to initialize pdfMake fonts", e);
-}
 
 // Helper to format title with colon
 const formatTitle = (title: string) => {
@@ -62,8 +44,23 @@ const processDescription = (items: string[]) => {
     return processed;
 };
 
-export const generateResumePDF = (data: ResumeData, format: ResumeFormat | string = ResumeFormat.CLASSIC_PROFESSIONAL) => {
+export const generateResumePDF = async (data: ResumeData, format: ResumeFormat | string = ResumeFormat.CLASSIC_PROFESSIONAL) => {
   console.log("generateResumePDF called with format:", format);
+  
+  // Dynamically import pdfmake to reduce initial bundle size
+  const pdfMakeModule = await import("pdfmake/build/pdfmake");
+  const pdfFontsModule = await import("pdfmake/build/vfs_fonts");
+  
+  const pm = (pdfMakeModule as any).default || pdfMakeModule;
+  const pf = (pdfFontsModule as any).default || pdfFontsModule;
+  
+  if (pm && pf) {
+    if (pf.pdfMake && pf.pdfMake.vfs) {
+      pm.vfs = pf.pdfMake.vfs;
+    } else if (pf.vfs) {
+      pm.vfs = pf.vfs;
+    }
+  }
   
   const content: any[] = [];
   
@@ -438,7 +435,6 @@ export const generateResumePDF = (data: ResumeData, format: ResumeFormat | strin
     }
   };
 
-  const pm = (pdfMake as any).default || pdfMake;
   const fileName = `${data.fullName.trim().replace(/\s+/g, '.')}.Formatted.pdf`;
   pm.createPdf(docDefinition).download(fileName);
 };

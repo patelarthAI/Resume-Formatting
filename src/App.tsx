@@ -18,12 +18,6 @@ import {
   ShieldCheck,
   Clock
 } from 'lucide-react';
-import * as mammoth from 'mammoth';
-import * as pdfjsLib from 'pdfjs-dist';
-import pdfWorker from 'pdfjs-dist/build/pdf.worker.mjs?url';
-
-// Configure PDF.js worker
-pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorker;
 
 interface StagedContent {
   text?: string;
@@ -153,6 +147,7 @@ const App: React.FC = () => {
         file.name.endsWith('.docx')
       ) {
         const arrayBuffer = await file.arrayBuffer();
+        const mammoth = await import('mammoth');
         const mammothInstance = (mammoth as any).default || mammoth;
         const result = await mammothInstance.extractRawText({ arrayBuffer });
         const text = result.value;
@@ -224,6 +219,10 @@ const App: React.FC = () => {
       if (file.type === 'application/pdf' || file.name.endsWith('.pdf')) {
         try {
           const arrayBuffer = await file.arrayBuffer();
+          const pdfjsLib = await import('pdfjs-dist');
+          const pdfWorker = (await import('pdfjs-dist/build/pdf.worker.mjs?url')).default;
+          pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorker;
+          
           const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
           let fullText = '';
           for (let i = 1; i <= pdf.numPages; i++) {
@@ -234,14 +233,23 @@ const App: React.FC = () => {
           }
           
           if (!fullText.trim()) {
-             throw new Error("Could not extract text from this PDF. It might be a scanned image.");
+            throw new Error("Empty text");
           }
           
           setStagedContent({ text: fullText, mimeType: 'text/plain', fileName: file.name });
           return;
         } catch (pdfError: any) {
-          console.error("PDF Extraction Error:", pdfError);
-          throw new Error("Failed to read PDF. " + (pdfError.message || ""));
+          console.warn("PDF Text Extraction Failed, falling back to base64:", pdfError);
+          const base64 = await new Promise<string>((resolve) => {
+            const reader = new FileReader();
+            reader.readAsDataURL(file);
+            reader.onload = () => {
+              const result = reader.result as string;
+              resolve(result.split(',')[1]);
+            };
+          });
+          setStagedContent({ base64, mimeType: 'application/pdf', fileName: file.name });
+          return;
         }
       }
 

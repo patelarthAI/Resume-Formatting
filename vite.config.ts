@@ -23,7 +23,7 @@ export default defineConfig(({ mode }) => {
       },
       plugins: [react(), tailwindcss()],
       build: {
-        chunkSizeWarningLimit: 1000,
+        chunkSizeWarningLimit: 3000,
         rollupOptions: {
           output: {
             manualChunks: {

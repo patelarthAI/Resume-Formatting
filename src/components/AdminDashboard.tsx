@@ -22,6 +22,7 @@ const AdminDashboard: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('pending');
   const [healthStatus, setHealthStatus] = useState<any>(null);
+  const [dbWarning, setDbWarning] = useState<string | null>(null);
 
   const checkHealth = async () => {
     try {
@@ -55,6 +56,7 @@ const AdminDashboard: React.FC = () => {
   const fetchResumes = async () => {
     try {
       setLoading(true);
+      setDbWarning(null);
       const response = await fetch(`/api/resumes?status=${statusFilter}`, {
         headers: {
           'x-admin-password': adminPassword || ''
@@ -83,6 +85,9 @@ const AdminDashboard: React.FC = () => {
       }
       const data = await response.json();
       setResumes(data.resumes || []);
+      if (data.usingDatabase === false) {
+        setDbWarning(data.dbError || "Database not configured. Using temporary in-memory storage (data will be lost on refresh).");
+      }
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -204,6 +209,19 @@ const AdminDashboard: React.FC = () => {
           </button>
         </div>
       </div>
+
+      {dbWarning && (
+        <div className="mb-6 p-4 bg-amber-500/10 border border-amber-500/20 rounded-xl flex items-start gap-3">
+          <AlertTriangle className="w-5 h-5 text-amber-400 mt-0.5 flex-shrink-0" />
+          <div>
+            <h3 className="text-amber-200 font-semibold">Database Connection Issue</h3>
+            <p className="text-amber-200/80 text-sm mt-1">{dbWarning}</p>
+            <p className="text-amber-200/80 text-sm mt-2 font-medium">
+              If you are on Vercel, make sure you have added NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY to your Vercel Environment Variables.
+            </p>
+          </div>
+        </div>
+      )}
 
       <div className="flex items-center gap-2 mb-6 border-b border-white/10 pb-4">
         <button

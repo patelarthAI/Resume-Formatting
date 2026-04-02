@@ -156,7 +156,7 @@ app.get("/api/resumes", checkAdmin, async (req, res) => {
         resumes = resumes.filter(r => r.status === status);
       }
 
-      res.status(200).json({ resumes });
+      res.status(200).json({ resumes, usingDatabase: true });
     } catch (dbError: any) {
       console.warn("Database error (falling back to in-memory):", dbError.message);
       
@@ -164,7 +164,7 @@ app.get("/api/resumes", checkAdmin, async (req, res) => {
       if (status && typeof status === 'string') {
         filtered = filtered.filter(r => r.status === status);
       }
-      res.status(200).json({ resumes: filtered });
+      res.status(200).json({ resumes: filtered, usingDatabase: false, dbError: dbError.message });
     }
   } catch (error: any) {
     console.error("Error fetching resumes:", error);

@@ -1,4 +1,5 @@
 import { ResumeData, ResumeFormat } from "@/types";
+import { cleanBullet, groupBulletPoints, processDescription } from "@/utils/formatters";
 
 // Helper to format title with colon
 const formatTitle = (title: string) => {
@@ -24,24 +25,6 @@ const formatModernDate = (dateStr: string) => {
     });
     
     return formatted;
-};
-
-// Helper to split long sentences into bullets if they contain periods
-const processDescription = (items: string[]) => {
-    if (!items) return [];
-    const processed: string[] = [];
-    items.forEach(item => {
-        if (item.length > 100 && item.includes('.')) {
-           const sentences = item.split(/\. (?=[A-Z])|\.$/g).filter(s => s.trim().length > 0);
-           sentences.forEach(s => {
-               const trimmed = s.trim();
-               processed.push(trimmed.endsWith('.') ? trimmed : `${trimmed}.`);
-           });
-        } else {
-            processed.push(item);
-        }
-    });
-    return processed;
 };
 
 export const generateResumePDF = async (data: ResumeData, format: ResumeFormat | string = ResumeFormat.CLASSIC_PROFESSIONAL) => {
@@ -103,29 +86,25 @@ export const generateResumePDF = async (data: ResumeData, format: ResumeFormat |
     content.push({
       text: formatTitle(data.sectionTitleSummary || "SUMMARY").toUpperCase(),
       style: 'sectionHeader',
-      margin: isModern ? [0, 10, 0, 12] : [0, 10, 0, 5],
+      margin: isModern ? [0, 12, 0, 12] : [0, 10, 0, 5],
       decoration: isModern ? undefined : undefined // Classic preview has border-bottom, pdfmake is harder, keeping clean
     });
 
-    if (Array.isArray(data.summary)) {
-      if (data.summary.length === 1) {
-        content.push({
-          text: data.summary[0],
-          style: 'bodyText',
-          margin: [0, 0, 0, 5]
-        });
-      } else {
-        content.push({
-          ul: [...data.summary], 
-          style: 'bodyText',
-          margin: [0, 0, 0, 5]
-        });
-      }
-    } else {
+    const summaryItems = Array.isArray(data.summary) ? data.summary : [data.summary as unknown as string];
+    const processedSummary = processDescription(summaryItems);
+
+    if (processedSummary.length === 1) {
       content.push({
-        text: data.summary,
+        text: cleanBullet(processedSummary[0]),
         style: 'bodyText',
         margin: [0, 0, 0, 5]
+      });
+    } else {
+      content.push({
+        ul: processedSummary.map(s => ({ text: cleanBullet(s), fontSize: styles.bodyFontSize })), 
+        fontSize: 13, // Set bullet size
+        style: 'bodyText',
+        margin: isModern ? [25, 0, 0, 5] : [0, 0, 0, 5]
       });
     }
   }
@@ -135,7 +114,7 @@ export const generateResumePDF = async (data: ResumeData, format: ResumeFormat |
     content.push({
       text: formatTitle(data.sectionTitleExperience || "PROFESSIONAL EXPERIENCE").toUpperCase(),
       style: 'sectionHeader',
-      margin: isModern ? [0, 10, 0, 12] : [0, 10, 0, 5]
+      margin: isModern ? [0, 12, 0, 12] : [0, 10, 0, 5]
     });
 
     data.experience.forEach(exp => {
@@ -203,9 +182,10 @@ export const generateResumePDF = async (data: ResumeData, format: ResumeFormat |
       // Bullets
       if (exp.description && exp.description.length > 0) {
         content.push({
-          ul: processDescription([...exp.description]), 
+          ul: processDescription([...exp.description]).map(s => ({ text: s, fontSize: styles.bodyFontSize })), 
+          fontSize: 13,
           style: 'bodyText',
-          margin: [0, 0, 0, 8]
+          margin: isModern ? [25, 0, 0, 8] : [0, 0, 0, 8]
         });
       }
     });
@@ -216,7 +196,7 @@ export const generateResumePDF = async (data: ResumeData, format: ResumeFormat |
     content.push({
       text: formatTitle(data.sectionTitleInternships || "INTERNSHIPS").toUpperCase(),
       style: 'sectionHeader',
-      margin: isModern ? [0, 10, 0, 12] : [0, 10, 0, 5]
+      margin: isModern ? [0, 12, 0, 12] : [0, 10, 0, 5]
     });
 
     data.internships.forEach(exp => {
@@ -278,9 +258,10 @@ export const generateResumePDF = async (data: ResumeData, format: ResumeFormat |
 
       if (exp.description && exp.description.length > 0) {
         content.push({
-          ul: processDescription([...exp.description]), 
+          ul: processDescription([...exp.description]).map(s => ({ text: s, fontSize: styles.bodyFontSize })), 
+          fontSize: 13,
           style: 'bodyText',
-          margin: [0, 0, 0, 8]
+          margin: isModern ? [25, 0, 0, 8] : [0, 0, 0, 8]
         });
       }
     });
@@ -291,7 +272,7 @@ export const generateResumePDF = async (data: ResumeData, format: ResumeFormat |
     content.push({
       text: formatTitle(data.sectionTitleEducation || "EDUCATION").toUpperCase(),
       style: 'sectionHeader',
-      margin: isModern ? [0, 10, 0, 12] : [0, 10, 0, 5]
+      margin: isModern ? [0, 12, 0, 12] : [0, 10, 0, 5]
     });
 
     data.education.forEach(edu => {
@@ -330,9 +311,10 @@ export const generateResumePDF = async (data: ResumeData, format: ResumeFormat |
 
       if (edu.details && edu.details.length > 0) {
         content.push({
-          ul: processDescription([...edu.details]), 
+          ul: processDescription([...edu.details]).map(s => ({ text: s, fontSize: styles.bodyFontSize })), 
+          fontSize: 13,
           style: 'bodyText',
-          margin: [0, 0, 0, 8]
+          margin: isModern ? [25, 0, 0, 8] : [0, 0, 0, 8]
         });
       }
     });
@@ -344,7 +326,7 @@ export const generateResumePDF = async (data: ResumeData, format: ResumeFormat |
       content.push({
         text: formatTitle(section.title).toUpperCase(),
         style: 'sectionHeader',
-        margin: isModern ? [0, 10, 0, 12] : [0, 10, 0, 5]
+        margin: isModern ? [0, 12, 0, 12] : [0, 10, 0, 5]
       });
 
       const titleUpper = section.title.toUpperCase();
@@ -353,61 +335,89 @@ export const generateResumePDF = async (data: ResumeData, format: ResumeFormat |
       const useColumns = isGridCandidate && !hasLongItems && section.items && section.items.length > 2;
 
       if (useColumns && section.items) {
+        const groupedItems = groupBulletPoints(section.items);
         const maxLen = Math.max(...section.items.map(i => i.length));
         const numCols = maxLen < 35 ? 3 : 2;
         const cols: any[][] = Array.from({ length: numCols }, () => []);
         
-        const processItem = (item: string) => {
-          const isKeyValue = item.includes(":");
-          if (isKeyValue) {
-            const parts = item.split(":");
-            const key = parts[0];
-            const value = parts.slice(1).join(":");
-            return {
-              text: [
-                { text: key + ":", bold: true },
-                value
-              ],
-              listType: 'none',
-              margin: [0, 2, 0, 2]
-            };
-          }
-          return item;
-        };
-        
-        const rows = Math.ceil(section.items.length / numCols);
-        section.items.forEach((item, idx) => {
+        const rows = Math.ceil(groupedItems.length / numCols);
+        groupedItems.forEach((g, idx) => {
           const colIdx = Math.floor(idx / rows);
           if (cols[colIdx]) {
-            cols[colIdx].push(processItem(item));
+            if (g.key) {
+              if (g.values.length === 1) {
+                cols[colIdx].push({
+                  text: [
+                    { text: g.key + ": ", bold: true },
+                    g.values[0].text
+                  ],
+                  listType: 'none',
+                  margin: [0, 2, 0, 2]
+                });
+              } else {
+                cols[colIdx].push({
+                  text: g.key + ":",
+                  bold: true,
+                  listType: 'none',
+                  margin: [0, 2, 0, 2]
+                });
+                cols[colIdx].push({
+                  ul: g.values.map(v => ({ text: v.text, fontSize: styles.bodyFontSize })),
+                  fontSize: 13,
+                  margin: isModern ? [25, 0, 0, 2] : [0, 0, 0, 2]
+                });
+              }
+            } else {
+              cols[colIdx].push({
+                ul: g.values.map(v => ({ text: v.text, fontSize: styles.bodyFontSize })),
+                fontSize: 13,
+                margin: isModern ? [25, 2, 0, 2] : [0, 2, 0, 2]
+              });
+            }
           }
         });
 
         content.push({
-          columns: cols.map(col => ({ ul: col, style: 'bodyText' })),
+          columns: cols.map(col => ({ stack: col, style: 'bodyText' })),
           margin: [0, 0, 0, 5]
         });
       } else if (section.items) {
-        const listItems = section.items.map(item => {
-          const isKeyValue = item.includes(":");
-          if (isKeyValue) {
-            const parts = item.split(":");
-            const key = parts[0];
-            const value = parts.slice(1).join(":");
-            return {
-              text: [
-                { text: key + ":", bold: true },
-                value
-              ],
-              listType: 'none',
-              margin: [0, 2, 0, 2]
-            };
+        const groupedItems = groupBulletPoints(section.items);
+        const stack: any[] = [];
+        
+        groupedItems.forEach(g => {
+          if (g.key) {
+            if (g.values.length === 1) {
+              stack.push({
+                text: [
+                  { text: g.key + ": ", bold: true },
+                  g.values[0].text
+                ],
+                margin: [0, 2, 0, 2]
+              });
+            } else {
+              stack.push({
+                text: g.key + ":",
+                bold: true,
+                margin: [0, 2, 0, 2]
+              });
+              stack.push({
+                ul: g.values.map(v => ({ text: v.text, fontSize: styles.bodyFontSize })),
+                fontSize: 13,
+                margin: isModern ? [25, 0, 0, 2] : [0, 0, 0, 2]
+              });
+            }
+          } else {
+            stack.push({
+              ul: g.values.map(v => ({ text: v.text, fontSize: styles.bodyFontSize })),
+              fontSize: 13,
+              margin: isModern ? [25, 2, 0, 2] : [0, 2, 0, 2]
+            });
           }
-          return item;
         });
-
+        
         content.push({
-          ul: listItems,
+          stack: stack,
           style: 'bodyText',
           margin: [0, 0, 0, 5]
         });
@@ -431,7 +441,8 @@ export const generateResumePDF = async (data: ResumeData, format: ResumeFormat |
       }
     },
     defaultStyle: {
-      font: 'Roboto' // pdfmake default font
+      font: 'Roboto', // pdfmake default font
+      lineHeight: 1
     }
   };
 

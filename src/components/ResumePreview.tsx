@@ -9,6 +9,7 @@ import GrammarHighlighter from "./GrammarHighlighter";
 import get from "lodash/get";
 import set from "lodash/set";
 import { motion, AnimatePresence } from "framer-motion";
+import { cleanBullet, groupBulletPoints, processDescription } from "@/utils/formatters";
 
 interface ResumePreviewProps {
   data: ResumeData;
@@ -52,11 +53,12 @@ const ResumePreview: React.FC<ResumePreviewProps> = ({ data, onDownload, onReset
             headingBorder: "none",
             headingColor: "#000000",
             nameAlign: "left" as const,
-            lineHeight: "1.5",
-            marginBottom: "1.5rem",
+            lineHeight: "1.0",
+            marginBottom: "11pt",
             showContactInfo: false, // Only location
             jobLayout: 'modern' as const, // Date -> Company -> Title
-            headingMarginBottom: "12px"
+            headingMarginTop: "11pt",
+            headingMarginBottom: "11pt"
         };
     }
     // Default Classic
@@ -72,6 +74,7 @@ const ResumePreview: React.FC<ResumePreviewProps> = ({ data, onDownload, onReset
         marginBottom: "1rem",
         showContactInfo: false, // Only location for privacy
         jobLayout: 'classic' as const,
+        headingMarginTop: "0px",
         headingMarginBottom: "4px"
     };
   };
@@ -145,26 +148,6 @@ const ResumePreview: React.FC<ResumePreviewProps> = ({ data, onDownload, onReset
       });
       
       return formatted;
-  };
-
-  // Helper to split long sentences into bullets if they contain periods
-  const processDescription = (items: string[]) => {
-      if (!items) return [];
-      const processed: string[] = [];
-      items.forEach(item => {
-          if (item.length > 100 && item.includes('.')) {
-             // Split by period, but ignore periods in common abbreviations (e.g., "Mr.", "Inc.") if possible.
-             // For simplicity, we split by ". " or "." at end of string.
-             const sentences = item.split(/\. (?=[A-Z])|\.$/g).filter(s => s.trim().length > 0);
-             sentences.forEach(s => {
-                 const trimmed = s.trim();
-                 processed.push(trimmed.endsWith('.') ? trimmed : `${trimmed}.`);
-             });
-          } else {
-              processed.push(item);
-          }
-      });
-      return processed;
   };
 
   const styleText = (text: string) => {
@@ -346,6 +329,11 @@ const ResumePreview: React.FC<ResumePreviewProps> = ({ data, onDownload, onReset
 
   return (
     <div className="flex flex-col lg:flex-row gap-8 w-full max-w-7xl mx-auto">
+      <style>{`
+        #resume-preview-content ul li::marker {
+          font-size: 13px;
+        }
+      `}</style>
       {/* Left Column: Resume Preview */}
       <div className="flex-1 min-w-0">
         <div className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-3xl p-6 md:p-8 shadow-2xl">
@@ -439,6 +427,7 @@ const ResumePreview: React.FC<ResumePreviewProps> = ({ data, onDownload, onReset
                   <h3 style={{ 
                       fontWeight: 'bold', 
                       textTransform: styles.headingTransform, 
+                      marginTop: styles.headingMarginTop,
                       marginBottom: styles.headingMarginBottom, 
                       fontSize: styles.fontSizeBody, 
                       color: styles.headingColor,
@@ -449,18 +438,27 @@ const ResumePreview: React.FC<ResumePreviewProps> = ({ data, onDownload, onReset
                   </h3>
                   {Array.isArray(data.summary) ? (
                       data.summary.length === 1 ? (
-                         <div style={{ fontSize: styles.fontSizeBody, lineHeight: styles.lineHeight, marginTop: 0 }}>
-                           <GrammarHighlighter 
-                             text={data.summary[0]} 
-                             path="summary.0" 
-                             issues={issues} 
-                             onAccept={handleAcceptIssue} 
-                             onIgnore={handleIgnoreIssue} 
-                           />
-                         </div>
+                         <ul style={{ listStyleType: 'disc', paddingLeft: '1.25rem', marginTop: 0 }}>
+                            {processDescription(data.summary).map((rawItem, idx) => {
+                              const item = cleanBullet(rawItem);
+                              return (
+                                <li key={idx} style={{ fontSize: styles.fontSizeBody, lineHeight: styles.lineHeight, marginBottom: '2px', paddingLeft: '2px' }}>
+                                  <GrammarHighlighter 
+                                    text={item} 
+                                    path={`summary.${idx}`} 
+                                    issues={issues} 
+                                    onAccept={handleAcceptIssue} 
+                                    onIgnore={handleIgnoreIssue} 
+                                  />
+                                </li>
+                              );
+                            })}
+                         </ul>
                       ) : (
                          <ul style={{ listStyleType: 'disc', paddingLeft: '1.25rem', marginTop: 0 }}>
-                            {data.summary.map((item, idx) => (
+                            {data.summary.map((rawItem, idx) => {
+                              const item = cleanBullet(rawItem);
+                              return (
                               <li key={idx} style={{ fontSize: styles.fontSizeBody, lineHeight: styles.lineHeight, marginBottom: '2px', paddingLeft: '2px' }}>
                                 <GrammarHighlighter 
                                   text={item} 
@@ -470,19 +468,26 @@ const ResumePreview: React.FC<ResumePreviewProps> = ({ data, onDownload, onReset
                                   onIgnore={handleIgnoreIssue} 
                                 />
                               </li>
-                            ))}
+                            )})}
                          </ul>
                       )
                   ) : (
-                      <div style={{ fontSize: styles.fontSizeBody, lineHeight: styles.lineHeight, marginTop: 0 }}>
-                        <GrammarHighlighter 
-                          text={data.summary} 
-                          path="summary" 
-                          issues={issues} 
-                          onAccept={handleAcceptIssue} 
-                          onIgnore={handleIgnoreIssue} 
-                        />
-                      </div>
+                      <ul style={{ listStyleType: 'disc', paddingLeft: '1.25rem', marginTop: 0 }}>
+                        {processDescription([data.summary]).map((rawItem, idx) => {
+                          const item = cleanBullet(rawItem);
+                          return (
+                            <li key={idx} style={{ fontSize: styles.fontSizeBody, lineHeight: styles.lineHeight, marginBottom: '2px', paddingLeft: '2px' }}>
+                              <GrammarHighlighter 
+                                text={item} 
+                                path={`summary`} 
+                                issues={issues} 
+                                onAccept={handleAcceptIssue} 
+                                onIgnore={handleIgnoreIssue} 
+                              />
+                            </li>
+                          );
+                        })}
+                      </ul>
                   )}
                 </div>
               )}
@@ -493,6 +498,7 @@ const ResumePreview: React.FC<ResumePreviewProps> = ({ data, onDownload, onReset
                   <h3 style={{ 
                       fontWeight: 'bold', 
                       textTransform: styles.headingTransform, 
+                      marginTop: styles.headingMarginTop,
                       marginBottom: styles.headingMarginBottom, 
                       fontSize: styles.fontSizeBody, 
                       color: styles.headingColor,
@@ -536,11 +542,9 @@ const ResumePreview: React.FC<ResumePreviewProps> = ({ data, onDownload, onReset
                                 </div>
                             </>
                         )}
-                        <ul style={{ listStyleType: 'none', paddingLeft: 0, marginTop: 0 }}>
+                        <ul style={{ listStyleType: 'disc', paddingLeft: '1.25rem', marginTop: 0 }}>
                           {exp.description && processDescription(exp.description).map((bullet, bIdx) => (
-                            <li key={bIdx} style={{ display: 'flex', alignItems: 'flex-start', gap: '0.5rem', marginBottom: 0 }}>
-                              <span style={{ marginTop: '0.25rem', fontSize: '0.75rem', lineHeight: '1rem' }}>•</span>
-                              <span style={{ fontSize: styles.fontSizeBody, lineHeight: styles.lineHeight }}>
+                            <li key={bIdx} style={{ fontSize: styles.fontSizeBody, lineHeight: styles.lineHeight, marginBottom: '2px', paddingLeft: '2px' }}>
                                 <GrammarHighlighter 
                                   text={bullet} 
                                   path={`experience.${idx}.description.${bIdx}`} // Note: Path might be slightly off if split, but acceptable for now
@@ -548,7 +552,6 @@ const ResumePreview: React.FC<ResumePreviewProps> = ({ data, onDownload, onReset
                                   onAccept={handleAcceptIssue} 
                                   onIgnore={handleIgnoreIssue} 
                                 />
-                              </span>
                             </li>
                           ))}
                         </ul>
@@ -564,6 +567,7 @@ const ResumePreview: React.FC<ResumePreviewProps> = ({ data, onDownload, onReset
                   <h3 style={{ 
                       fontWeight: 'bold', 
                       textTransform: styles.headingTransform, 
+                      marginTop: styles.headingMarginTop,
                       marginBottom: styles.headingMarginBottom, 
                       fontSize: styles.fontSizeBody, 
                       color: styles.headingColor,
@@ -607,11 +611,9 @@ const ResumePreview: React.FC<ResumePreviewProps> = ({ data, onDownload, onReset
                                 </div>
                             </>
                         )}
-                        <ul style={{ listStyleType: 'none', paddingLeft: 0, marginTop: 0 }}>
+                        <ul style={{ listStyleType: 'disc', paddingLeft: '1.25rem', marginTop: 0 }}>
                           {exp.description && processDescription(exp.description).map((bullet, bIdx) => (
-                            <li key={bIdx} style={{ display: 'flex', alignItems: 'flex-start', gap: '0.5rem', marginBottom: 0 }}>
-                              <span style={{ marginTop: '0.25rem', fontSize: '0.75rem', lineHeight: '1rem' }}>•</span>
-                              <span style={{ fontSize: styles.fontSizeBody, lineHeight: styles.lineHeight }}>
+                            <li key={bIdx} style={{ fontSize: styles.fontSizeBody, lineHeight: styles.lineHeight, marginBottom: '2px', paddingLeft: '2px' }}>
                                 <GrammarHighlighter 
                                   text={bullet} 
                                   path={`internships.${idx}.description.${bIdx}`} 
@@ -619,7 +621,6 @@ const ResumePreview: React.FC<ResumePreviewProps> = ({ data, onDownload, onReset
                                   onAccept={handleAcceptIssue} 
                                   onIgnore={handleIgnoreIssue} 
                                 />
-                              </span>
                             </li>
                           ))}
                         </ul>
@@ -635,6 +636,7 @@ const ResumePreview: React.FC<ResumePreviewProps> = ({ data, onDownload, onReset
                   <h3 style={{ 
                       fontWeight: 'bold', 
                       textTransform: styles.headingTransform, 
+                      marginTop: styles.headingMarginTop,
                       marginBottom: styles.headingMarginBottom, 
                       fontSize: styles.fontSizeBody, 
                       color: styles.headingColor,
@@ -690,6 +692,7 @@ const ResumePreview: React.FC<ResumePreviewProps> = ({ data, onDownload, onReset
                        <h3 style={{ 
                            fontWeight: 'bold', 
                            textTransform: styles.headingTransform, 
+                           marginTop: styles.headingMarginTop,
                            marginBottom: styles.headingMarginBottom, 
                            fontSize: styles.fontSizeBody, 
                            color: styles.headingColor,
@@ -706,37 +709,54 @@ const ResumePreview: React.FC<ResumePreviewProps> = ({ data, onDownload, onReset
                                marginTop: 0,
                                listStyleType: 'disc'
                            }}>
-                              {section.items && section.items.map((item, iIdx) => {
-                                const isKeyValue = item.includes(":");
-                                if (isKeyValue) {
-                                   const parts = item.split(":");
-                                   const key = parts[0];
-                                   const value = parts.slice(1).join(":");
-                                   
-                                   return (
-                                     <li key={iIdx} style={{ listStyleType: 'none', marginLeft: '-1.25rem', fontSize: styles.fontSizeBody, lineHeight: styles.lineHeight, marginBottom: '2px', breakInside: 'avoid' }}>
-                                        <span style={{ fontWeight: 'bold' }}>{key}:</span>
+                              {section.items && groupBulletPoints(section.items).map((g, gIdx) => {
+                                if (g.key) {
+                                  if (g.values.length === 1) {
+                                    return (
+                                      <li key={gIdx} style={{ listStyleType: 'none', marginLeft: '-1.25rem', fontSize: styles.fontSizeBody, lineHeight: styles.lineHeight, marginBottom: '2px', breakInside: 'avoid' }}>
+                                        <span style={{ fontWeight: 'bold' }}>{g.key}:</span>{' '}
                                         <GrammarHighlighter 
-                                          text={value} 
-                                          path={`customSections.${idx}.items.${iIdx}`} 
+                                          text={g.values[0].text} 
+                                          path={`customSections.${idx}.items.${g.values[0].originalIndex}`} 
                                           issues={issues} 
                                           onAccept={handleAcceptIssue} 
                                           onIgnore={handleIgnoreIssue} 
                                         />
-                                     </li>
-                                   );
+                                      </li>
+                                    );
+                                  } else {
+                                    return (
+                                      <li key={gIdx} style={{ listStyleType: 'none', marginLeft: '-1.25rem', fontSize: styles.fontSizeBody, lineHeight: styles.lineHeight, marginBottom: '2px', breakInside: 'avoid' }}>
+                                        <div style={{ fontWeight: 'bold' }}>{g.key}:</div>
+                                        <ul style={{ listStyleType: 'disc', paddingLeft: '1.25rem', marginTop: '2px', marginBottom: 0 }}>
+                                          {g.values.map((v, vIdx) => (
+                                            <li key={vIdx} style={{ marginBottom: '2px', paddingLeft: '2px' }}>
+                                              <GrammarHighlighter 
+                                                text={v.text} 
+                                                path={`customSections.${idx}.items.${v.originalIndex}`} 
+                                                issues={issues} 
+                                                onAccept={handleAcceptIssue} 
+                                                onIgnore={handleIgnoreIssue} 
+                                              />
+                                            </li>
+                                          ))}
+                                        </ul>
+                                      </li>
+                                    );
+                                  }
+                                } else {
+                                  return g.values.map((v, vIdx) => (
+                                    <li key={`${gIdx}-${vIdx}`} style={{ fontSize: styles.fontSizeBody, lineHeight: styles.lineHeight, marginBottom: '2px', paddingLeft: '2px', breakInside: 'avoid' }}>
+                                      <GrammarHighlighter 
+                                        text={v.text} 
+                                        path={`customSections.${idx}.items.${v.originalIndex}`} 
+                                        issues={issues} 
+                                        onAccept={handleAcceptIssue} 
+                                        onIgnore={handleIgnoreIssue} 
+                                      />
+                                    </li>
+                                  ));
                                 }
-                                return (
-                                  <li key={iIdx} style={{ fontSize: styles.fontSizeBody, lineHeight: styles.lineHeight, marginBottom: '2px', paddingLeft: '2px', breakInside: 'avoid' }}>
-                                    <GrammarHighlighter 
-                                      text={item} 
-                                      path={`customSections.${idx}.items.${iIdx}`} 
-                                      issues={issues} 
-                                      onAccept={handleAcceptIssue} 
-                                      onIgnore={handleIgnoreIssue} 
-                                    />
-                                  </li>
-                                );
                               })}
                            </ul>
                        </div>
@@ -772,7 +792,21 @@ const ResumePreview: React.FC<ResumePreviewProps> = ({ data, onDownload, onReset
 
                 <div className="space-y-3 max-h-[300px] overflow-y-auto pr-2 custom-scrollbar">
                     {issues.map((issue) => (
-                        <div key={issue.id} className="p-3 rounded-xl bg-white/5 border border-white/5 hover:bg-white/10 transition-colors group">
+                        <div 
+                            key={issue.id} 
+                            onClick={() => {
+                                const el = document.getElementById(`issue-${issue.id}`);
+                                if (el) {
+                                    el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                                    // Simulate click to open popover
+                                    const spanEl = el.querySelector('span[style*="cursor: pointer"]');
+                                    if (spanEl) {
+                                        (spanEl as HTMLElement).click();
+                                    }
+                                }
+                            }}
+                            className="p-3 rounded-xl bg-white/5 border border-white/5 hover:bg-white/10 transition-colors group cursor-pointer"
+                        >
                             <div className="flex items-center justify-between mb-1">
                                 <span className={`text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded ${
                                     issue.type === 'SPELLING' ? 'bg-red-500/20 text-red-300' : (issue.type === 'STYLE' ? 'bg-purple-500/20 text-purple-300' : 'bg-emerald-500/20 text-emerald-300')

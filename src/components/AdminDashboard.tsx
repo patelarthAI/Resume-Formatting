@@ -26,7 +26,13 @@ const AdminDashboard: React.FC = () => {
 
   const checkHealth = async () => {
     try {
-      const response = await fetch('/api/health');
+      const response = await fetch(`/api/health?_t=${Date.now()}`, {
+        headers: {
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+          'Pragma': 'no-cache',
+          'Expires': '0'
+        }
+      });
       const data = await response.json();
       setHealthStatus(data);
     } catch (err: any) {
@@ -57,9 +63,12 @@ const AdminDashboard: React.FC = () => {
     try {
       setLoading(true);
       setDbWarning(null);
-      const response = await fetch(`/api/resumes?status=${statusFilter}`, {
+      const response = await fetch(`/api/resumes?status=${statusFilter}&_t=${Date.now()}`, {
         headers: {
-          'x-admin-password': adminPassword || ''
+          'x-admin-password': adminPassword || '',
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+          'Pragma': 'no-cache',
+          'Expires': '0'
         }
       });
       if (!response.ok) {

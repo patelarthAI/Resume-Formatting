@@ -1,6 +1,6 @@
 import 'dotenv/config';
 
-async function testResumes() {
+async function testHeaders() {
   try {
     const res = await fetch('http://localhost:3000/api/resumes?status=pending', {
       headers: {
@@ -8,11 +8,15 @@ async function testResumes() {
       }
     });
     console.log("Status:", res.status);
+    console.log("Headers:");
+    res.headers.forEach((value, key) => {
+      console.log(`  ${key}: ${value}`);
+    });
     const text = await res.text();
-    console.log("Response:", text.substring(0, 200));
+    console.log("Response:", text.substring(0, 100));
   } catch (e) {
     console.error(e);
   }
 }
 
-testResumes();
+testHeaders();

@@ -15,6 +15,7 @@ import {
   TabStopPosition,
 } from "docx";
 import { ResumeData, ResumeFormat } from "@/types";
+import { cleanBullet, groupBulletPoints, processDescription } from "@/utils/formatters";
 
 // CONSTANTS
 const FONT_FAMILY = "Calibri";
@@ -67,26 +68,6 @@ export const generateResumeDoc = async (data: ResumeData, format: ResumeFormat =
       return formatted;
   };
 
-  // Helper to split long sentences into bullets if they contain periods
-  const processDescription = (items: string[]) => {
-      if (!items) return [];
-      const processed: string[] = [];
-      items.forEach(item => {
-          if (item.length > 100 && item.includes('.')) {
-             // Split by period, but ignore periods in common abbreviations (e.g., "Mr.", "Inc.") if possible.
-             // For simplicity, we split by ". " or "." at end of string.
-             const sentences = item.split(/\. (?=[A-Z])|\.$/g).filter(s => s.trim().length > 0);
-             sentences.forEach(s => {
-                 const trimmed = s.trim();
-                 processed.push(trimmed.endsWith('.') ? trimmed : `${trimmed}.`);
-             });
-          } else {
-              processed.push(item);
-          }
-      });
-      return processed;
-  };
-
   const emptyLine = () => new Paragraph({
       text: "",
       children: [new TextRun({ text: "", font: FONT_FAMILY, size: SIZE_TEXT })],
@@ -98,18 +79,12 @@ export const generateResumeDoc = async (data: ResumeData, format: ResumeFormat =
   // We place a bullet, a tab, then text.
   const createBulletParagraph = (text: string) => {
       return new Paragraph({
-          indent: { left: convertInchesToTwip(0.25), hanging: convertInchesToTwip(0.25) },
+          numbering: {
+              reference: "custom-bullet",
+              level: 0
+          },
           spacing: SINGLE_LINE,
-          tabStops: [
-              { type: TabStopType.LEFT, position: convertInchesToTwip(0.25) }
-          ],
           children: [
-              new TextRun({ 
-                  text: "•\t", // Small standard bullet
-                  font: FONT_FAMILY, 
-                  size: SIZE_TEXT, 
-                  color: COLOR_BLACK 
-              }),
               new TextRun({ 
                   text: text, 
                   font: FONT_FAMILY, 
@@ -125,7 +100,7 @@ export const generateResumeDoc = async (data: ResumeData, format: ResumeFormat =
     const title = text.trim().endsWith(':') ? text.trim() : `${text.trim()}:`;
     return new Paragraph({
       alignment: AlignmentType.LEFT,
-      spacing: { ...SINGLE_LINE, after: isModern ? 120 : 0 }, // Add spacing for Modern (120 twips = 6pt)
+      spacing: { ...SINGLE_LINE, before: 0, after: 0 },
       border: undefined,
       children: [
         new TextRun({
@@ -181,50 +156,123 @@ export const generateResumeDoc = async (data: ResumeData, format: ResumeFormat =
   };
 
   const createColumnList = (items: string[]) => {
+    const groupedItems = groupBulletPoints(items);
     const maxLen = Math.max(...items.map(i => i.length));
     const numCols = maxLen < 35 ? 3 : 2;
-    const elements = [];
-    const rows = Math.ceil(items.length / numCols);
+    const rows = Math.ceil(groupedItems.length / numCols);
+    const tableRows = [];
 
     for (let i = 0; i < rows; i++) {
-      const children = [];
-      const tabStops = [];
-
+      const cells = [];
       for (let c = 0; c < numCols; c++) {
         const itemIndex = i + c * rows;
-        const item = items[itemIndex];
-        if (!item) continue;
-
-        const colOffset = c * (7.5 / numCols); // 7.5 inches is writable width
-        const isKeyValue = item.includes(":");
-
-        if (c > 0) {
-          children.push(new TextRun({ text: "\t", font: FONT_FAMILY, size: SIZE_TEXT }));
-          tabStops.push({ type: TabStopType.LEFT, position: convertInchesToTwip(colOffset) });
+        const g = groupedItems[itemIndex];
+        
+        if (!g) {
+          cells.push(new TableCell({
+            children: [new Paragraph({ text: "" })],
+            borders: { top: { style: BorderStyle.NONE }, bottom: { style: BorderStyle.NONE }, left: { style: BorderStyle.NONE }, right: { style: BorderStyle.NONE } }
+          }));
+          continue;
         }
 
-        if (isKeyValue) {
-          const parts = item.split(":");
-          const key = parts[0];
-          const value = parts.slice(1).join(":");
-          children.push(new TextRun({ text: key + ":", font: FONT_FAMILY, size: SIZE_TEXT, color: COLOR_BLACK, bold: true }));
-          children.push(new TextRun({ text: value, font: FONT_FAMILY, size: SIZE_TEXT, color: COLOR_BLACK }));
+        const cellChildren: Paragraph[] = [];
+
+        if (g.key) {
+          if (g.values.length === 1) {
+            cellChildren.push(new Paragraph({
+              spacing: SINGLE_LINE,
+              children: [
+                new TextRun({ text: g.key + ": ", font: FONT_FAMILY, size: SIZE_TEXT, color: COLOR_BLACK, bold: true }),
+                new TextRun({ text: g.values[0].text, font: FONT_FAMILY, size: SIZE_TEXT, color: COLOR_BLACK })
+              ]
+            }));
+          } else {
+            cellChildren.push(new Paragraph({
+              spacing: SINGLE_LINE,
+              children: [
+                new TextRun({ text: g.key + ":", font: FONT_FAMILY, size: SIZE_TEXT, color: COLOR_BLACK, bold: true })
+              ]
+            }));
+            g.values.forEach(v => {
+              cellChildren.push(new Paragraph({
+                numbering: {
+                  reference: "custom-bullet",
+                  level: 0
+                },
+                spacing: SINGLE_LINE,
+                children: [
+                  new TextRun({ text: v.text, font: FONT_FAMILY, size: SIZE_TEXT, color: COLOR_BLACK })
+                ]
+              }));
+            });
+          }
         } else {
-          children.push(new TextRun({ text: "• ", font: FONT_FAMILY, size: SIZE_TEXT, color: COLOR_BLACK }));
-          children.push(new TextRun({ text: item, font: FONT_FAMILY, size: SIZE_TEXT, color: COLOR_BLACK }));
+          g.values.forEach(v => {
+            cellChildren.push(new Paragraph({
+              numbering: {
+                reference: "custom-bullet",
+                level: 0
+              },
+              spacing: SINGLE_LINE,
+              children: [
+                new TextRun({ text: v.text, font: FONT_FAMILY, size: SIZE_TEXT, color: COLOR_BLACK })
+              ]
+            }));
+          });
         }
-      }
 
-      elements.push(new Paragraph({
-        spacing: SINGLE_LINE,
-        tabStops: tabStops,
-        children: children
-      }));
+        cells.push(new TableCell({
+          children: cellChildren,
+          borders: { top: { style: BorderStyle.NONE }, bottom: { style: BorderStyle.NONE }, left: { style: BorderStyle.NONE }, right: { style: BorderStyle.NONE } },
+          margins: { top: 0, bottom: 0, left: 0, right: convertInchesToTwip(0.1) }
+        }));
+      }
+      tableRows.push(new TableRow({ children: cells }));
     }
-    return elements;
+
+    return [new Table({
+      rows: tableRows,
+      width: { size: 100, type: WidthType.PERCENTAGE },
+      borders: {
+        top: { style: BorderStyle.NONE },
+        bottom: { style: BorderStyle.NONE },
+        left: { style: BorderStyle.NONE },
+        right: { style: BorderStyle.NONE },
+        insideHorizontal: { style: BorderStyle.NONE },
+        insideVertical: { style: BorderStyle.NONE }
+      }
+    })];
   };
 
   const doc = new Document({
+    numbering: {
+      config: [
+        {
+          reference: "custom-bullet",
+          levels: [
+            {
+              level: 0,
+              format: "bullet",
+              text: "\u2022",
+              alignment: AlignmentType.LEFT,
+              style: {
+                paragraph: {
+                  indent: { 
+                    left: convertInchesToTwip(isModern ? 0.5 : 0.25), 
+                    hanging: convertInchesToTwip(0.25) 
+                  },
+                },
+                run: {
+                  font: "Arial",
+                  size: 26, // 13pt bullet size
+                },
+              },
+            },
+          ],
+        },
+      ],
+    },
     styles: {
       default: {
         document: {
@@ -274,8 +322,10 @@ export const generateResumeDoc = async (data: ResumeData, format: ResumeFormat =
           // 2. SUMMARY
           ...(data.summary ? [
             createSectionHeader(data.sectionTitleSummary || "SUMMARY"),
-            ...(Array.isArray(data.summary) ? data.summary : [data.summary]).map(item => {
-               if (Array.isArray(data.summary) && data.summary.length > 1) {
+            ...(isModern ? [emptyLine()] : []),
+            ...processDescription(Array.isArray(data.summary) ? data.summary : [data.summary]).map(rawItem => {
+               const item = cleanBullet(rawItem);
+               if ((Array.isArray(data.summary) && data.summary.length > 1) || processDescription([data.summary as any]).length > 1) {
                   return createBulletParagraph(item);
                }
                return new Paragraph({
@@ -296,6 +346,7 @@ export const generateResumeDoc = async (data: ResumeData, format: ResumeFormat =
           // 3. EXPERIENCE
           ...(data.experience && data.experience.length > 0 ? [
             createSectionHeader(data.sectionTitleExperience || "PROFESSIONAL EXPERIENCE"),
+            ...(isModern ? [emptyLine()] : []),
             ...data.experience.flatMap((exp) => {
               const elements = [];
               
@@ -348,6 +399,7 @@ export const generateResumeDoc = async (data: ResumeData, format: ResumeFormat =
           // 4. INTERNSHIPS (Handle exactly like experience)
           ...(data.internships && data.internships.length > 0 ? [
             createSectionHeader(data.sectionTitleInternships || "INTERNSHIPS"),
+            ...(isModern ? [emptyLine()] : []),
             ...data.internships.flatMap((exp) => {
               const elements = [];
               
@@ -397,6 +449,7 @@ export const generateResumeDoc = async (data: ResumeData, format: ResumeFormat =
           // 5. EDUCATION
           ...(data.education && data.education.length > 0 ? [
             createSectionHeader(data.sectionTitleEducation || "EDUCATION"),
+            ...(isModern ? [emptyLine()] : []),
             ...data.education.flatMap((edu) => {
                const elements = [];
                
@@ -452,37 +505,47 @@ export const generateResumeDoc = async (data: ResumeData, format: ResumeFormat =
 
              const elements = [];
              elements.push(createSectionHeader(section.title));
+             if (isModern) elements.push(emptyLine());
              
              if (useColumns && section.items) {
-               elements.push(...createColumnList(section.items));
+               const cleanedItems = section.items.map(i => cleanBullet(i));
+               elements.push(...createColumnList(cleanedItems));
              } else if (section.items) {
-               section.items.forEach(item => {
-                 const isKeyValue = item.includes(":"); 
-                 if (isKeyValue) {
-                    const parts = item.split(":");
-                    const key = parts[0];
-                    const value = parts.slice(1).join(":");
-                    
-                    elements.push(new Paragraph({
-                        spacing: SINGLE_LINE,
-                        children: [
-                          new TextRun({
-                            text: key + ":",
-                            font: FONT_FAMILY,
-                            size: SIZE_TEXT,
-                            color: COLOR_BLACK,
-                            bold: true
-                          }),
-                          new TextRun({
-                            text: value,
-                            font: FONT_FAMILY,
-                            size: SIZE_TEXT,
-                            color: COLOR_BLACK,
-                          }),
-                        ],
-                    }));
+               const groupedItems = groupBulletPoints(section.items);
+               groupedItems.forEach(g => {
+                 if (g.key) {
+                   if (g.values.length === 1) {
+                     elements.push(new Paragraph({
+                       spacing: SINGLE_LINE,
+                       children: [
+                         new TextRun({ text: g.key + ": ", font: FONT_FAMILY, size: SIZE_TEXT, color: COLOR_BLACK, bold: true }),
+                         new TextRun({ text: g.values[0].text, font: FONT_FAMILY, size: SIZE_TEXT, color: COLOR_BLACK })
+                       ]
+                     }));
+                   } else {
+                     elements.push(new Paragraph({
+                       spacing: SINGLE_LINE,
+                       children: [
+                         new TextRun({ text: g.key + ":", font: FONT_FAMILY, size: SIZE_TEXT, color: COLOR_BLACK, bold: true })
+                       ]
+                     }));
+                     g.values.forEach(v => {
+                       elements.push(new Paragraph({
+                         numbering: {
+                           reference: "custom-bullet",
+                           level: 0
+                         },
+                         spacing: SINGLE_LINE,
+                         children: [
+                           new TextRun({ text: v.text, font: FONT_FAMILY, size: SIZE_TEXT, color: COLOR_BLACK })
+                         ]
+                       }));
+                     });
+                   }
                  } else {
-                    elements.push(createBulletParagraph(item));
+                   g.values.forEach(v => {
+                     elements.push(createBulletParagraph(v.text));
+                   });
                  }
                });
              }

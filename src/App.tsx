@@ -51,7 +51,13 @@ const App: React.FC = () => {
   }, [pendingResumeId]);
 
   useEffect(() => {
-    fetch('/api/health')
+    fetch(`/api/health?_t=${Date.now()}`, {
+      headers: {
+        'Cache-Control': 'no-cache, no-store, must-revalidate',
+        'Pragma': 'no-cache',
+        'Expires': '0'
+      }
+    })
       .then(res => res.json())
       .then(data => {
         console.log('Backend Health:', data);
@@ -71,7 +77,13 @@ const App: React.FC = () => {
       console.log("Polling for approval status for resume:", pendingResumeId);
       intervalId = setInterval(async () => {
         try {
-          const res = await fetch(`/api/resumes/${pendingResumeId}/status`);
+          const res = await fetch(`/api/resumes/${pendingResumeId}/status?_t=${Date.now()}`, {
+            headers: {
+              'Cache-Control': 'no-cache, no-store, must-revalidate',
+              'Pragma': 'no-cache',
+              'Expires': '0'
+            }
+          });
           if (res.ok) {
             const data = await res.json();
             console.log("Approval status response:", data);
@@ -141,10 +153,12 @@ const App: React.FC = () => {
     setAppState(AppState.STAGING);
 
     try {
+      const fileNameLower = file.name.toLowerCase();
+
       // 1. DOCX Handling
       if (
         file.type === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' || 
-        file.name.endsWith('.docx')
+        fileNameLower.endsWith('.docx')
       ) {
         const arrayBuffer = await file.arrayBuffer();
         const mammoth = await import('mammoth');
@@ -161,7 +175,7 @@ const App: React.FC = () => {
       // 1.5. Legacy .doc Handling (Server-side)
       if (
         file.type === 'application/msword' || 
-        file.name.endsWith('.doc')
+        fileNameLower.endsWith('.doc')
       ) {
         const base64Data = await new Promise<string>((resolve, reject) => {
           const reader = new FileReader();
@@ -206,9 +220,9 @@ const App: React.FC = () => {
       if (
         file.type === 'text/plain' || 
         file.type === 'text/markdown' || 
-        file.name.endsWith('.txt') || 
-        file.name.endsWith('.md') ||
-        file.name.endsWith('.rtf')
+        fileNameLower.endsWith('.txt') || 
+        fileNameLower.endsWith('.md') ||
+        fileNameLower.endsWith('.rtf')
       ) {
         const text = await file.text();
         setStagedContent({ text, mimeType: 'text/plain', fileName: file.name });
@@ -216,7 +230,7 @@ const App: React.FC = () => {
       }
 
       // 3. PDF Handling (Extract Text Client-Side)
-      if (file.type === 'application/pdf' || file.name.endsWith('.pdf')) {
+      if (file.type === 'application/pdf' || fileNameLower.endsWith('.pdf')) {
         try {
           const arrayBuffer = await file.arrayBuffer();
           const pdfjsLib = await import('pdfjs-dist');

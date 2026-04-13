@@ -1,8 +1,8 @@
 import 'dotenv/config';
 
-async function testHealth() {
+async function testInvalid() {
   try {
-    const res = await fetch('http://localhost:3000/api/health');
+    const res = await fetch('http://localhost:3000/api/invalid-route');
     console.log("Status:", res.status);
     const text = await res.text();
     console.log("Response:", text.substring(0, 100));
@@ -11,4 +11,4 @@ async function testHealth() {
   }
 }
 
-testHealth();
+testInvalid();

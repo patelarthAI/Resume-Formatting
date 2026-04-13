@@ -36,6 +36,8 @@ const getKeyPool = (): string[] => {
     keys.push(process.env.GEMINI_API_KEY);
   }
   
+  console.log("Loaded API keys count:", keys.length);
+  
   return keys;
 };
 
@@ -71,9 +73,9 @@ async function withModelFallback<T>(
 
   const models = usePro ? PRO_MODELS : FALLBACK_MODELS;
 
-  // We try up to 3 times total across keys/models
+  // We try up to 5 times total across keys/models
   let totalAttempts = 0;
-  const maxAttempts = 3;
+  const maxAttempts = 5;
 
   for (const modelId of models) {
     for (let i = 0; i < pool.length; i++) {
@@ -91,9 +93,21 @@ async function withModelFallback<T>(
           errorString.includes("Quota exceeded") ||
           errorString.includes("RESOURCE_EXHAUSTED");
           
-        if (isRateLimit) {
-          rateLimitHits++;
-          console.warn(`[${operationName}] Model ${modelId} with Key ${currentKeyIndex % pool.length} hit rate limit. Rotating key...`);
+        const isInvalidKey = error?.status === 400 || 
+          error?.status === 403 || 
+          errorString.includes("API key not valid") || 
+          errorString.includes("API_KEY_INVALID");
+          
+        const isServerError = error?.status === 500 || 
+          error?.status === 503 || 
+          errorString.includes("500") || 
+          errorString.includes("503") ||
+          errorString.includes("Internal Server Error") ||
+          errorString.includes("Service Unavailable");
+          
+        if (isRateLimit || isInvalidKey || isServerError) {
+          if (isRateLimit) rateLimitHits++;
+          console.warn(`[${operationName}] Model ${modelId} with Key ${currentKeyIndex % pool.length} failed (${isRateLimit ? 'Rate Limit' : isInvalidKey ? 'Invalid Key' : 'Server Error'}). Retrying...`);
           currentKeyIndex++; // Move to next key
           totalAttempts++;
           lastError = error;
@@ -150,6 +164,7 @@ CRITICAL RULES:
 6. **TITLES**: Capture the EXACT section titles used in the resume.
 7. **PRIVACY**: Do NOT include any phone numbers or email addresses in ANY field (including summary, custom sections, or title). If found, remove them completely.
 8. **INLINE LISTS**: If you encounter a single line that contains multiple items separated by symbols like "◆", "•", "|", or "-", you MUST split that line into individual items in the array. For example, "◆ SolidWorks ◆ AutoCAD" should become two items: "SolidWorks" and "AutoCAD".
+9. **CLEAN BULLETS**: Remove all bullet characters (e.g., "•", "-", "*", "◆") from the beginning of ANY extracted item (in experience bullets, custom sections, summary, etc.). The array items should just be the text.
 
 Call 'save_resume_data' with the extracted data.
 `;
@@ -290,23 +305,24 @@ export const analyzeGrammar = async (data: ResumeData, format: ResumeFormat, use
             text: `Review the following resume data for spelling, grammar, and smart stylistic improvements. 
             
             CRITICAL INSTRUCTIONS:
-            1. **Spelling**: Identify and fix clear spelling mistakes. Categorize as 'SPELLING'.
-            2. **Grammar & Verb Tense**: Identify obvious grammatical errors, incorrect verb tenses, or punctuation issues. Categorize as 'GRAMMAR'.
-            3. **Smart Resume Coach (Style)**: 
+            1. **Spelling**: Identify and fix ANY spelling mistakes, typos, or extra spaces (e.g., "follow-the- sun" -> "follow-the-sun"). Categorize as 'SPELLING'.
+            2. **Grammar & Verb Tense**: Identify grammatical errors, incorrect verb tenses, or punctuation issues. Categorize as 'GRAMMAR'.
+            3. **First-Person Pronouns**: Resumes should NEVER use first-person pronouns (I, me, my, mine, we, us, our). Flag ANY instance of these words. Provide suggestions that rewrite the sentence to remove them (e.g., change "I led a team" to "Led a team"). Categorize as 'STYLE'.
+            4. **Smart Resume Coach (Style)**: 
                - Suggest high-impact, context-aware improvements to phrasing.
                - DO NOT just swap single words if it makes the sentence read awkwardly. Instead, select the entire phrase or sentence as the 'errorText' and provide a fully rewritten, polished version as the 'suggestion'.
                - Ensure suggestions make logical sense for the specific line, industry, and context.
                - Categorize these as 'STYLE'.
-            4. **Precision & Safety**: DO NOT change dates, numbers, metrics, factual information, or proper nouns. DO NOT hallucinate new skills or experiences.
-            5. **Context**: For each issue, explain WHY the change is recommended (e.g., "Using 'Spearheaded' instead of 'Led' adds more executive impact, and restructuring the sentence highlights the 30% metric better.").
-            6. **Exclusions**: DO NOT flag technical terms, version numbers, framework names, dates, or proper nouns.
-            7. **Replacement Integrity**: 
-               - 'errorText' MUST be the EXACT substring from the 'original' text.
+            5. **Precision & Safety**: DO NOT change dates, numbers, metrics, factual information, or proper nouns. DO NOT hallucinate new skills or experiences.
+            6. **Context**: For each issue, explain WHY the change is recommended (e.g., "Using 'Spearheaded' instead of 'Led' adds more executive impact, and restructuring the sentence highlights the 30% metric better.").
+            7. **Exclusions**: DO NOT flag technical terms, version numbers, framework names, dates, or proper nouns.
+            8. **Replacement Integrity**: 
+               - 'errorText' MUST be the EXACT substring from the 'original' text. It must match character-for-character, including spaces and punctuation.
                - 'suggestions' MUST be drop-in replacements for 'errorText'. 
                - If 'errorText' is a whole sentence, 'suggestions' should be whole sentences.
                - NEVER return a suggestion that is a partial correction of the 'errorText' if 'errorText' is a whole sentence.
-            8. Return a list of issues using the 'save_grammar_issues' tool.
-            9. For each issue, provide:
+            9. Return a list of issues using the 'save_grammar_issues' tool. You MUST find at least 1-2 stylistic improvements if there are no spelling/grammar errors.
+            10. For each issue, provide:
                - 'path': The exact JSON path (dot notation).
                - 'original': The FULL text content of that field.
                - 'errorText': The EXACT substring within 'original' that is incorrect or could be improved.
@@ -321,7 +337,7 @@ export const analyzeGrammar = async (data: ResumeData, format: ResumeFormat, use
       },
       config: {
         systemInstruction: `
-ACT AS A SMART RESUME COACH. You are allowed to fix objective spelling and grammar errors, and provide high-impact stylistic improvements. You are forbidden from hallucinating facts, changing metrics, or altering dates.
+ACT AS A SMART RESUME COACH. You are allowed to fix objective spelling and grammar errors, and provide high-impact stylistic improvements. You MUST strictly enforce the rule against using first-person pronouns (I, me, my, we, etc.) in resumes. You are forbidden from hallucinating facts, changing metrics, or altering dates.
 `,
         tools: [{ functionDeclarations: [grammarAnalysisTool] }],
         toolConfig: { 
@@ -396,11 +412,18 @@ export const extractResumeData = async (
       
       STYLE-SPECIFIC INSTRUCTIONS:
       ${payload.format === ResumeFormat.MODERN_EXECUTIVE 
-        ? "- Focus on clarity and professional expansion. Ensure location (City, State, Zip) is clearly extracted. Abbreviate months to 3 letters (e.g., 'Jan') for internal normalization." 
-        : "- Focus on brevity and traditional formatting. Abbreviate months to 3 letters (e.g., 'Jan')."}
+        ? "- Ensure location (City, State, Zip) is clearly extracted. Abbreviate months to 3 letters (e.g., 'Jan') for internal normalization." 
+        : "- Abbreviate months to 3 letters (e.g., 'Jan')."}
       
       GENERAL INSTRUCTIONS:
-      Do not miss ANY sections. Map Work to Experience, Internships to Internships, Education to Education. Put 'Soft Skills', 'Technical Skills', 'Languages', 'Tools', 'Projects' into customSections. CRITICAL: For contactInfo.location, extract City, State, and Zip Code if available. CRITICAL: For dates, if a month is present, abbreviate it to 3 letters (e.g., 'Jan'). If NO month is present, DO NOT add one (e.g., keep '2023' as '2023'). CRITICAL: Remove ALL phone numbers and email addresses from the main content, but keep them in the contactInfo fields if found. CRITICAL: Split inline lists separated by "◆", "•", or "|" into separate array items.`,
+      Do not miss ANY sections. Map Work to Experience, Internships to Internships, Education to Education. Put 'Soft Skills', 'Technical Skills', 'Languages', 'Tools', 'Projects' into customSections. 
+      CRITICAL: For contactInfo.location, extract City, State, and Zip Code if available. 
+      CRITICAL: For dates, if a month is present, abbreviate it to 3 letters (e.g., 'Jan'). If NO month is present, DO NOT add one (e.g., keep '2023' as '2023'). 
+      CRITICAL: Remove ALL phone numbers and email addresses from the main content, but keep them in the contactInfo fields if found. 
+      CRITICAL: Split inline lists separated by "◆", "•", or "|" into separate array items.
+      
+      ABSOLUTE MOST IMPORTANT RULE:
+      DO NOT SUMMARIZE, TRUNCATE, OR OMIT ANY INFORMATION. You must extract EVERY SINGLE WORD from the original text. If a bullet point is long, keep it long. If there are many skills, extract all of them exactly as written. Do not rewrite or shorten anything. Loss of data is unacceptable.`,
     });
 
     const response = await ai.models.generateContent({
@@ -410,7 +433,7 @@ export const extractResumeData = async (
       },
       config: {
         systemInstruction: `
-ACT AS A SECURE RESUME ARCHITECT. Provide expert-level resume formatting, focusing on ATS-optimization, high-impact action verbs, and clean structural hierarchy.
+ACT AS A STRICT DATA EXTRACTOR. Your ONLY job is to map the provided text into the JSON schema. You are FORBIDDEN from summarizing, shortening, rewriting, or omitting any information from the original text. Every word must be preserved.
 `,
         tools: [{ functionDeclarations: [saveResumeTool] }],
         toolConfig: { 

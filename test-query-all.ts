@@ -5,14 +5,15 @@ async function testQuery() {
   let query = supabaseAdmin
     .from('resumes')
     .select('id, status, created_at, content->fileName, content->rejected, content->auto_rejected')
-    .order('created_at', { ascending: false })
-    .eq('status', 'approved');
+    .order('created_at', { ascending: false });
     
   const { data, error } = await query;
   console.log("Error:", error);
   console.log("Count:", data?.length);
-  if (data?.length > 0) {
-    console.log("First item:", data[0]);
+  
+  if (data) {
+    const size = JSON.stringify(data).length;
+    console.log("JSON size:", size);
   }
 }
 

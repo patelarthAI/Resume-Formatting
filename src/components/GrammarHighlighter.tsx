@@ -38,10 +38,45 @@ const GrammarHighlighter: React.FC<GrammarHighlighterProps> = ({
   // Sort issues by their position in the text to render them in order
   // Note: We assume non-overlapping issues for simplicity, which is typical for LLM output
   const sortedIssues = [...fieldIssues]
-    .map(issue => ({
-        ...issue,
-        index: text.indexOf(issue.errorText)
-    }))
+    .map(issue => {
+        // Clean bullet from errorText just in case AI included it
+        let cleanErrorText = issue.errorText.replace(/^\s*([\u2022\u25E6\u2023\u25B8\u25AA\u25AB\-\*\u2013\u2014\u2043\u2219\u25C6\u27A2\uF0D8\u00B7]\s*)+/, '').trim();
+        let index = text.indexOf(cleanErrorText);
+        
+        // Fallback: case-insensitive search if exact match fails
+        if (index === -1) {
+            const lowerText = text.toLowerCase();
+            const lowerError = cleanErrorText.toLowerCase();
+            index = lowerText.indexOf(lowerError);
+        }
+
+        // Aggressive fallback: remove all non-alphanumeric characters and search
+        if (index === -1) {
+            const strip = (s: string) => s.replace(/[^a-z0-9]/gi, '');
+            const strippedText = strip(text);
+            const strippedError = strip(cleanErrorText);
+            const strippedIndex = strippedText.indexOf(strippedError);
+            
+            if (strippedIndex !== -1) {
+                // We found a match in the stripped version, but we need the index in the original text.
+                // This is complex, so we'll just approximate it by finding the first word of the error
+                const firstWord = cleanErrorText.split(/\s+/)[0];
+                if (firstWord) {
+                    index = text.toLowerCase().indexOf(firstWord.toLowerCase());
+                    if (index !== -1) {
+                        // Adjust cleanErrorText to match the original text length approximately
+                        cleanErrorText = text.substring(index, index + cleanErrorText.length);
+                    }
+                }
+            }
+        }
+
+        return {
+            ...issue,
+            cleanErrorText,
+            index
+        };
+    })
     .filter(issue => issue.index !== -1)
     .sort((a, b) => a.index - b.index);
 
@@ -67,7 +102,12 @@ const GrammarHighlighter: React.FC<GrammarHighlighterProps> = ({
       const label = isSpelling ? 'Spelling Error' : (isStyle ? 'Style Suggestion' : 'Grammar Correction');
 
       result.push(
-        <span key={issue.id} className="relative inline-block" style={{ zIndex: activeIssueId === issue.id ? 50 : 1 }}>
+        <span 
+          key={issue.id} 
+          id={`issue-${issue.id}`}
+          className="relative inline-block" 
+          style={{ zIndex: activeIssueId === issue.id ? 50 : 1 }}
+        >
           <span 
             ref={activeIssueId === issue.id ? spanRef : null}
             style={{
@@ -111,7 +151,7 @@ const GrammarHighlighter: React.FC<GrammarHighlighterProps> = ({
                 }
             }}
           >
-            {issue.errorText}
+            {text.substring(issue.index, issue.index + issue.cleanErrorText.length)}
           </span>
           
           {activeIssueId === issue.id && (
@@ -137,7 +177,7 @@ const GrammarHighlighter: React.FC<GrammarHighlighterProps> = ({
               </div>
               
               <div className="p-2 rounded border mb-3" style={{ backgroundColor: '#f8fafc', borderColor: '#e2e8f0' }}>
-                 <div className="line-through text-xs mb-1 opacity-60" style={{ color: '#475569' }}>{issue.errorText}</div>
+                 <div className="line-through text-xs mb-1 opacity-60" style={{ color: '#475569' }}>{issue.cleanErrorText}</div>
                  <div className="flex flex-col gap-1 mt-2">
                     {issue.suggestions.map((suggestion, sIdx) => (
                         <button
@@ -176,7 +216,7 @@ const GrammarHighlighter: React.FC<GrammarHighlighterProps> = ({
         </span>
       );
 
-      lastIndex = issue.index + issue.errorText.length;
+      lastIndex = issue.index + issue.cleanErrorText.length;
     });
 
     // Add remaining text
